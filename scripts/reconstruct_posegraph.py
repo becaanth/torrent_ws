@@ -8,9 +8,9 @@ import pdb
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
-folder_path = '/home/asrl/ASRL/vtr3/torrent_scripts'
+folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
 bag_name = 're_baseline'
-chunk_name =  bag_name + '_deconstructed'
+chunk_name =  'deconstructed/' + bag_name
 chunks_path = f'{folder_path}/{chunk_name}'
 
 """
@@ -146,7 +146,6 @@ def write_rosbag_from_df(df, output_dir):
         write_metadata_yaml(df, bag_path, topic_name, topic_type)
         write_rosbag(df, bag_path, topic_name, topic_type)
 
-
 # List all .db3 chunk files in sorted order
 db_files = sorted([f for f in os.listdir(chunks_path) if f.endswith('.db3')])
 
@@ -188,7 +187,7 @@ for table, dfs in chunked_data.items():
 print(all_data['vertices'].head())
 print(all_data['edges'].head())
 
-output_dir = bag_name + '_reconstructed'
+output_dir = 'reconstructed/' + bag_name
 os.makedirs(output_dir, exist_ok=True)
 
 for key in all_data.keys():

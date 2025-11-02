@@ -1,2 +1,5 @@
-re*
-re_*
+reconstructed/*
+deconstructed/*
+build/*
+log/*
+install/*

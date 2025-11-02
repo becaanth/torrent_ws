@@ -184,7 +184,7 @@ submap_ptrs, map_vids = get_teach_submap_ptrs(bag_path)
 waypoints = set_teach_waypoints(bag_path, len(tv))
 env_info = set_env_info(bag_path, len(tv))
 
-output_dir = bag_name + '_deconstructed'
+output_dir = 'deconstructed/' + bag_name
 os.makedirs(output_dir, exist_ok=True)
 print(output_dir)
 # write to .db3 vertex chunks
