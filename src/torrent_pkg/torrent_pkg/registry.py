@@ -21,7 +21,7 @@ def string_to_bits(s):
     for c in s:
         byte = ord(c)
         bitfield.extend([(byte >> bit) & 1 for bit in range(7, -1, -1)])
-    return bitfield
+    return np.array(bitfield)
 
 
 class Registry(Node):
@@ -35,18 +35,24 @@ class Registry(Node):
         folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
         bag_name = 're_baseline'
         self.chunks_path = f'{folder_path}/deconstructed/{self.robot_id}/{bag_name}'
-
-        self.gossip_most_chunks = 0
         os.makedirs(self.chunks_path, exist_ok=True)
 
         timer_period = 1  # seconds
         self.timer = self.create_timer(timer_period, self.timer_callback)
 
+        self.gossip_most_chunks = 0
+
+        # gossip this robots current chunks
         self.publisher_ = self.create_publisher(SubmapRegistry, f'/robot_{self.robot_id}/gossip', 10)
+
+        # subscribe to fleet gossip
+        # NOTE: we are using gossip for peer discovery, this is proof of concept
         self.subscribers = []
+        self.robot_registries = {} # dictionary of which robots have what chunks
         for robot_id in range(num_robots):
             topic_name = f'/robot_{robot_id}/gossip'
             if robot_id != self.robot_id:
+                self.robot_registries[robot_id] = []
                 sub = self.create_subscription(
                     SubmapRegistry,
                     topic_name,
@@ -59,8 +65,6 @@ class Registry(Node):
         
     def timer_callback(self):
         msg = SubmapRegistry()
-        # Suppose chunk C0 is available on R1 and R3 of a 4-robot fleet
-        # Bit 0 = R0, Bit 1 = R1, Bit 2 = R2, Bit 3 = R3
         chunks = self.find_chunks()
         msg.num_submaps = len(chunks)
         if len(chunks) > self.gossip_most_chunks:
@@ -86,20 +90,44 @@ class Registry(Node):
             self.gossip_most_chunks = msg.num_submaps # max num submaps equivalent to most heard
 
         # what chunks does other robot have?
-        their_chunks = string_to_bits(msg.possessed_submaps)
+        self.robot_registries[robot_id] = string_to_bits(msg.possessed_submaps)
 
+        self.update_registries()
         # what chunks do i have?
         my_chunks = self.find_chunks()
 
         # make arrs compatible
 
-        # pdb.set_trace()
         
     def find_chunks(self):
         # List all .db3 chunk files in sorted order
         db_files = [f for f in os.listdir(self.chunks_path) if f.endswith('.db3')]
         chunks = sorted([int(f.split('.')[0]) for f in db_files])
-        return chunks
+        return np.array(chunks)
+    
+    def update_registries(self):
+        """Combine all known robot registries into a global view."""
+        if not self.robot_registries:
+            return
+
+        # Find the max bitfield length (some robots may have more chunks)
+        max_len = max(len(bits) for bits in self.robot_registries.values())
+
+        # Pad bitfields to equal length
+        aligned = []
+        for rid, bits in self.robot_registries.items():
+            if len(bits) < max_len:
+                padded = np.concatenate([bits, np.zeros(max_len - len(bits), dtype=np.uint8)])
+            else:
+                padded = bits
+            aligned.append(padded)
+
+        # Stack into a matrix: rows = robots, columns = chunks
+        # registry_matrix = np.vstack(aligned)
+
+        self.get_logger().info(
+            f"Updated global registry: {max_len} total chunks across fleet"
+        )
 
 
 def main(args=None):
