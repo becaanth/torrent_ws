@@ -10,7 +10,7 @@ from rosidl_runtime_py.utilities import get_message
 
 folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
 bag_name = 're_baseline'
-chunk_name =  'deconstructed/' + bag_name
+chunk_name =  'deconstructed/0/' + bag_name
 chunks_path = f'{folder_path}/{chunk_name}'
 
 """
@@ -187,7 +187,7 @@ for table, dfs in chunked_data.items():
 print(all_data['vertices'].head())
 print(all_data['edges'].head())
 
-output_dir = 'reconstructed/' + bag_name
+output_dir = 'reconstructed/0/' + bag_name
 os.makedirs(output_dir, exist_ok=True)
 
 for key in all_data.keys():
