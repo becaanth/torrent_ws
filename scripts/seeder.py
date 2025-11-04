@@ -3,6 +3,7 @@ import libtorrent as lt
 import time
 import os
 import socket
+import pdb
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -26,6 +27,8 @@ def create_and_seed_torrent(file_path):
     t = lt.create_torrent(fs)
     lt.set_piece_hashes(t, os.path.dirname(file_path))
     torrent = t.generate()
+
+    pdb.set_trace()
 
     torrent_path = file_path + '.torrent'
     with open(torrent_path, "wb") as f:
@@ -60,7 +63,7 @@ def create_and_seed_torrent(file_path):
         print("\n[-] Seeder stopped.")
 
 if __name__ == "__main__":
-    file_path = input("Enter the path to the image file: ").strip()
+    file_path = input("Enter the path to the file: ").strip()
     if not os.path.exists(file_path):
         print("[-] File not found.")
         exit(1)

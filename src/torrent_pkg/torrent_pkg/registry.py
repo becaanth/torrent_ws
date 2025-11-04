@@ -40,7 +40,7 @@ class Registry(Node):
         timer_period = 1  # seconds
         self.timer = self.create_timer(timer_period, self.timer_callback)
 
-        self.gossip_most_chunks = 0
+        self.gossip_most_chunks = 1
 
         # gossip this robots current chunks
         self.publisher_ = self.create_publisher(SubmapRegistry, f'/robot_{self.robot_id}/gossip', 10)
@@ -73,7 +73,7 @@ class Registry(Node):
         # Initialize a byte per chunk, all zeros
         bitfield = [0] * (len(chunks) + len(chunks)%8)
         for i, chunk in enumerate(chunks):
-            bitfield[chunk] = 1
+            bitfield[int(chunk)] = 1
 
         # Convert bits to bytes
         encoded = bits_to_string(bitfield)
@@ -86,9 +86,6 @@ class Registry(Node):
     def gossip_callback(self, msg, robot_id):
         self.get_logger().info(f"Received gossip from robot {robot_id}: {msg.num_submaps} submaps")
         # here we can compare submaps we have with submaps from other robots
-        if self.gossip_most_chunks < msg.num_submaps:
-            self.gossip_most_chunks = msg.num_submaps # max num submaps equivalent to most heard
-
         # what chunks does other robot have?
         self.robot_registries[robot_id] = string_to_bits(msg.possessed_submaps)
 
@@ -96,13 +93,33 @@ class Registry(Node):
         # what chunks do i have?
         my_chunks = self.find_chunks()
 
-        # make arrs compatible
+        # what chunk do i need? go from start to end
+        count = 0
+        found = False
+
+        while count < len(my_chunks) and not found:
+            if my_chunks[count] == 0:
+                # who has the chunk we need?
+                for rid in self.robot_registries.keys():
+                    try:
+                        if self.robot_registries[rid][count] == 1:
+                            # this robot has the chunk we need
+                            # ask for magnet URI
+                            print(f'robot{rid} has next chunk {count}, asking for magnet URI')
+                            found = True  # stop the outer while loop
+                            break          # stop checking other robots for this chunk
+                    except KeyError:
+                        continue
+            count += 1
+
 
         
     def find_chunks(self):
         # List all .db3 chunk files in sorted order
         db_files = [f for f in os.listdir(self.chunks_path) if f.endswith('.db3')]
         chunks = sorted([int(f.split('.')[0]) for f in db_files])
+        max_len = max(len(bits) for bits in self.robot_registries.values())
+        chunks = np.concatenate([chunks, np.zeros(max_len - len(chunks), dtype=np.uint8)])
         return np.array(chunks)
     
     def update_registries(self):
