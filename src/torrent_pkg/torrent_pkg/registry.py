@@ -1,11 +1,14 @@
 import rclpy
 from rclpy.node import Node
+import libtorrent as lt
 import numpy as np
 import os
+import time
+import socket
 
-from std_msgs.msg import UInt8MultiArray, MultiArrayDimension
+from std_msgs.msg import String
 from torrent_msgs.msg import SubmapRegistry
-
+from torrent_msgs.srv import GetMagnetURI
 import pdb
 
 def bits_to_string(bitfield):
@@ -23,6 +26,15 @@ def string_to_bits(s):
         bitfield.extend([(byte >> bit) & 1 for bit in range(7, -1, -1)])
     return np.array(bitfield)
 
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('10.255.255.255', 1))
+        return s.getsockname()[0]
+    except:
+        return '127.0.0.1'
+    finally:
+        s.close()
 
 class Registry(Node):
     def __init__(self, num_robots=4):
@@ -43,7 +55,7 @@ class Registry(Node):
         self.gossip_most_chunks = 1
 
         # gossip this robots current chunks
-        self.publisher_ = self.create_publisher(SubmapRegistry, f'/robot_{self.robot_id}/gossip', 10)
+        self.pub_registry = self.create_publisher(SubmapRegistry, f'/robot_{self.robot_id}/gossip', 10)
 
         # subscribe to fleet gossip
         # NOTE: we are using gossip for peer discovery, this is proof of concept
@@ -60,9 +72,20 @@ class Registry(Node):
                     10
                 )
                 self.subscribers.append(sub)
-
         self.subscription = self.create_subscription(SubmapRegistry,'/robot',self.gossip_callback,10)
-        
+
+        # --- Magnet URI publisher (optional broadcast) ---
+        self.pub_magnetURI = self.create_publisher(String, f'/robot_{self.robot_id}/magnet_uri', 10)
+
+        # --- Magnet URI service ---
+        service_name = f'/robot_{self.robot_id}/magnet_service'
+        self.srv_magnet = self.create_service(
+            GetMagnetURI,
+            service_name,
+            self.magnet_service_callback
+        )
+        print(f'Magnet URI service running on: {service_name}')
+
     def timer_callback(self):
         msg = SubmapRegistry()
         chunks = self.find_chunks()
@@ -81,7 +104,7 @@ class Registry(Node):
         print(f'num submaps: {msg.num_submaps}, bitfield: {encoded}')
         msg.possessed_submaps = encoded
 
-        self.publisher_.publish(msg)
+        self.pub_registry.publish(msg)
 
     def gossip_callback(self, msg, robot_id):
         self.get_logger().info(f"Received gossip from robot {robot_id}: {msg.num_submaps} submaps")
@@ -106,13 +129,25 @@ class Registry(Node):
                             # this robot has the chunk we need
                             # ask for magnet URI
                             print(f'robot{rid} has next chunk {count}, asking for magnet URI')
+                            self.request_magnet_URI(rid, count)
                             found = True  # stop the outer while loop
                             break          # stop checking other robots for this chunk
                     except KeyError:
                         continue
             count += 1
 
+    def magnet_service_callback(self):
+        # TODO: HANDLE LIBTORRENT FOR SETTING UP MAGNET URI
+        a=1
 
+    def request_magnet_URI(self, rid, chunk_id):
+        client = self.create_client(GetMagnetURI, f'/robot_{rid}/get_magnet')
+        while not client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(f'Service not available yet: robot {rid}')
+        req = GetMagnetURI.Request()
+        req.chunk_id = chunk_id
+        future = client.call_async(req)
+        return future
         
     def find_chunks(self):
         # List all .db3 chunk files in sorted order

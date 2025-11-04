@@ -15,8 +15,17 @@ file(
   msg/*.msg
 )
 
+# ROS messages
+file(
+  GLOB_RECURSE SRV_SRC
+  RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+  srv/*.srv
+)
+
+
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${MSG_SRC}
+  ${SRV_SRC}
   DEPENDENCIES builtin_interfaces geometry_msgs
 )
 
