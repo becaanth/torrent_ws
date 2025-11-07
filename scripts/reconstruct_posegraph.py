@@ -68,7 +68,7 @@ def write_metadata_yaml(df, bag_dir, topic_name, topic_type):
     with open(yaml_path, 'w') as f:
         yaml.dump(metadata, f, sort_keys=False)
 
-    print(f"✅ metadata.yaml written to {yaml_path}")
+    print(f"metadata.yaml written to {yaml_path}")
 
 def write_rosbag(df, bag_path, topic_name, topic_type):
     if topic_name == 'index':
@@ -112,7 +112,7 @@ def write_rosbag(df, bag_path, topic_name, topic_type):
 
     conn.commit()
     conn.close()
-    print(f"✅ Wrote ROS2 bag for topic {topic_name}: {db_path}")
+    print(f"Wrote ROS2 bag for topic {topic_name}: {db_path}")
 
 def write_rosbag_from_df(df, output_dir):
     """

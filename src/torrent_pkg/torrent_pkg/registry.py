@@ -5,6 +5,8 @@ import numpy as np
 import os
 import time
 import socket
+import threading
+from queue import Queue
 
 from std_msgs.msg import String
 from torrent_msgs.msg import SubmapRegistry
@@ -36,9 +38,33 @@ def get_local_ip():
     finally:
         s.close()
 
+def torrent_thread(file_path, seed_queue, magnet_queue):
+    session = lt.session()
+    session.listen_on(6881, 6891)
+
+    torrents = {}
+
+    while True:
+        while not seed_queue.empty():
+            filename = seed_queue.get()
+            fs = lt.file_storage()
+            lt.add_files(fs,filename)
+            t = lt.create_torrent(fs)
+            lt.set_piece_hashes(t, os.path.dirname(file_path))
+            torrent = t.generate()
+
 class Registry(Node):
     def __init__(self, num_robots=4):
         super().__init__('registry')
+        self.seed_queue = Queue()
+        self.magnet_queue = Queue()
+        self.torrent_thread = threading.Thread(
+            target=torrent_thread,
+            args=(self.seed_queue, self.magnet_queue),
+            daemon=True
+        )
+        self.torrent_thread.start()
+
         # Declare the parameter and provide a default value
         self.declare_parameter('robot_id', 0)
         self.robot_id = self.get_parameter('robot_id').value
@@ -181,17 +207,11 @@ class Registry(Node):
             f"Updated global registry: {max_len} total chunks across fleet"
         )
 
-
 def main(args=None):
     rclpy.init(args=args)
-
     registry = Registry()
 
     rclpy.spin(registry)
-
-    # Destroy the node explicitly
-    # (optional - otherwise it will be done automatically
-    # when the garbage collector destroys the node object)
     registry.destroy_node()
     rclpy.shutdown()
 
