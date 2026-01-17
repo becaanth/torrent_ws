@@ -227,7 +227,6 @@ if __name__ == '__main__':
         output_dir = 'reconstructed/0/' + bag_name + '/' + bag_name + '_' + str(i) 
         print(f'reconstructing segment {i}')
         os.makedirs(output_dir, exist_ok=True)
-        pdb.set_trace()
         
         for key in all_data.keys():
             print(f'serializing: {key}')

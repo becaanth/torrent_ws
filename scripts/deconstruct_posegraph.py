@@ -151,28 +151,43 @@ def get_teach_submap_ptrs(bag_path):
     conn.close()
     return submap_ptrs_df, map_vids[map_vids < 1e6]
 
-def set_env_info(bag_path, num_teach_vtx):
-    wp = pd.DataFrame({
-    "topic_name": ["env_info"],
-    "topic_type": ["vtr_tactic_msgs/msg/EnvInfo"],
-    "timestamp": [-1],
-    "data": [b'\x00\x01\x00\x00\x01']
-    }, index=[0])
+def get_env_info(bag_path):
+# GET ENV INFO
+    which_data = 'env_info'
+    conn = sqlite3.connect(f'{bag_path}/data/{which_data}/{which_data}_0.db3')
+    # Merge messages with topic info
+    env_info_df = pd.read_sql_query("""
+    SELECT 
+        t.name AS topic_name,
+        t.type AS topic_type,
+        m.timestamp,
+        m.data
+    FROM messages AS m
+    JOIN topics AS t ON m.topic_id = t.id
+    ORDER BY m.timestamp;
+    """, conn)
+    
+    conn.close()
+    return env_info_df
 
-    waypoints_df = pd.concat([wp] * num_teach_vtx, ignore_index=True)
-    return waypoints_df
-
-def set_teach_waypoints(bag_path, num_teach_vtx):
-    wp = pd.DataFrame({
-    "topic_name": ["waypoint_name"],
-    "topic_type": ["vtr_tactic_msgs/msg/WaypointNames"],
-    "timestamp": [-1],
-    "data": [b'\x00\x01\x00\x00\x01\x00\x00\x00\x00']
-    }, index=[0])
-
-    waypoints_df = pd.concat([wp] * num_teach_vtx, ignore_index=True)
-    return waypoints_df
-
+def get_teach_waypoints(bag_path):
+# GET WAYPOINT NAMES
+    which_data = 'waypoint_name'
+    conn = sqlite3.connect(f'{bag_path}/data/{which_data}/{which_data}_0.db3')
+    # Merge messages with topic info
+    waypoint_name_df = pd.read_sql_query("""
+    SELECT 
+        t.name AS topic_name,
+        t.type AS topic_type,
+        m.timestamp,
+        m.data
+    FROM messages AS m
+    JOIN topics AS t ON m.topic_id = t.id
+    ORDER BY m.timestamp;
+    """, conn)
+    
+    conn.close()
+    return waypoint_name_df
 
 # get vertices, edges, submaps
 tv, vids = get_teach_vertices(bag_path)
@@ -180,13 +195,12 @@ te, to_ids, from_ids = get_teach_edges(bag_path)
 ti = get_teach_index(bag_path)
 submaps, sids = get_teach_submaps(bag_path)
 submap_ptrs, map_vids = get_teach_submap_ptrs(bag_path)
-waypoints = set_teach_waypoints(bag_path, len(tv)) # problem.
-env_info = set_env_info(bag_path, len(tv))
+waypoints = get_teach_waypoints(bag_path)
+env_info = get_env_info(bag_path)
 
 output_dir = 'deconstructed/0/' + bag_name
 os.makedirs(output_dir, exist_ok=True)
 print(output_dir)
-pdb.set_trace()
 # write to .db3 vertex chunks
 for i, sid in enumerate(sids):
     # write a .db3 for each sid
