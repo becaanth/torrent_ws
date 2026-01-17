@@ -8,19 +8,18 @@ from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
 folder_path = '/home/asrl/ASRL/vtr3/temp'
-bag_name = 're_baseline'
+bag_name = 'woody_convoy'
 bag_path = f'{folder_path}/{bag_name}/graph'
 
 """
-    CHECKLIST:
     - index
-    x vertices
-    x edges
-    x pointmap
+    - vertices
+    - edges
+    - pointmap
     x pointmap_v0, copy pointmap on reconstruction
-    x pointmap_ptr (we can sidestep this)
-    x waypoint_name
-    x env_info
+    - pointmap_ptr
+    - waypoint_name
+    - env_info
 """
 
 def get_teach_vertices(bag_path):
@@ -181,12 +180,13 @@ te, to_ids, from_ids = get_teach_edges(bag_path)
 ti = get_teach_index(bag_path)
 submaps, sids = get_teach_submaps(bag_path)
 submap_ptrs, map_vids = get_teach_submap_ptrs(bag_path)
-waypoints = set_teach_waypoints(bag_path, len(tv))
+waypoints = set_teach_waypoints(bag_path, len(tv)) # problem.
 env_info = set_env_info(bag_path, len(tv))
 
 output_dir = 'deconstructed/0/' + bag_name
 os.makedirs(output_dir, exist_ok=True)
 print(output_dir)
+pdb.set_trace()
 # write to .db3 vertex chunks
 for i, sid in enumerate(sids):
     # write a .db3 for each sid

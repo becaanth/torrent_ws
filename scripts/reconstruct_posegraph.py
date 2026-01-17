@@ -9,7 +9,7 @@ from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
 folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
-bag_name = 're_baseline'
+bag_name = 'woody_convoy'
 chunk_name =  'deconstructed/0/' + bag_name
 chunks_path = f'{folder_path}/{chunk_name}'
 
@@ -22,7 +22,7 @@ def inspect_ros_data(frame):
     msg = deserialize_message(frame.data, get_message(frame["topic_type"]))
     return msg
 
-def write_metadata_yaml(df, bag_dir, topic_name, topic_type, segment_num):
+def write_metadata_yaml(df, bag_dir, topic_name, topic_type, segment_num, partial):
     """
     Generate metadata.yaml for a single-topic ROS 2 bag.
     
@@ -33,19 +33,32 @@ def write_metadata_yaml(df, bag_dir, topic_name, topic_type, segment_num):
     """
     if topic_name == 'index':
         df = df.loc[[0]] # we only need one message
+
+    # handle discontinuities
     if partial and topic_name == 'edges':
-        df = df.iloc[:-1]
-    starting_ts = int(df['timestamp'].min())
-    duration_ns = int(df['timestamp'].max() - starting_ts)
+        if segment_num == 0: 
+            # remove the last edge
+            df = df.iloc[:-1]
+        else: # remove first and last edge
+            df = df.iloc[1:-1]
+
     num_messages = len(df)
+    if topic_name in ['index', 'vertices', 'edges', 'env_info']:
+        duration_nanoseconds = 1
+        nanoseconds_since_epoch = 0
+    else:
+        nanoseconds_since_epoch = int(df['timestamp'].min())
+        duration_nanoseconds = int(df['timestamp'].max() - nanoseconds_since_epoch)
+
+    print(f's: {nanoseconds_since_epoch}, d: {duration_nanoseconds}, #: {num_messages}')
 
     metadata = {
         "rosbag2_bagfile_information": {
             "version": 4,
             "storage_identifier": "sqlite3",
             "relative_file_paths": [f"{topic_name.strip('/').replace('/', '_')}_0.db3"],
-            "duration": {"nanoseconds": duration_ns},
-            "starting_time": {"nanoseconds_since_epoch": starting_ts},
+            "duration": {"nanoseconds": duration_nanoseconds},
+            "starting_time": {"nanoseconds_since_epoch": nanoseconds_since_epoch},
             "message_count": num_messages,
             "topics_with_message_count": [
                 {
@@ -69,15 +82,20 @@ def write_metadata_yaml(df, bag_dir, topic_name, topic_type, segment_num):
 
     print(f"metadata.yaml written to {yaml_path}")
 
-def write_rosbag(df, bag_path, topic_name, topic_type, partial):
+def write_rosbag(df, bag_path, topic_name, topic_type, segment_num, partial):
     if topic_name == 'index':
         df = df.loc[[0]] # we only need one message
     db_path = f'{bag_path}/{topic_name}_0.db3'
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
 
+    # handle discontinuities
     if partial and topic_name == 'edges':
-        df = df.iloc[:-1]
+        if segment_num == 0: 
+            # remove the last edge
+            df = df.iloc[:-1]
+        else: # remove first and last edge
+            df = df.iloc[1:-1]
 
     # --- Create ROS2 bag tables ---
     cur.execute("""
@@ -116,7 +134,7 @@ def write_rosbag(df, bag_path, topic_name, topic_type, partial):
     conn.close()
     print(f"Wrote ROS2 bag for topic {topic_name}: {db_path}")
 
-def write_rosbag_from_df(df, output_dir, partial):
+def write_rosbag_from_df(df, output_dir, segment_num, partial):
     """
     Write a ROS2-compatible .db3 bag from a DataFrame with columns:
     ['topic_name', 'topic_type', 'timestamp', 'data']
@@ -124,105 +142,95 @@ def write_rosbag_from_df(df, output_dir, partial):
     topic_name = df['topic_name'].iloc[0]
     topic_type = df['topic_type'].iloc[0]
 
+    # make necessary directories
     if topic_name == 'vtr_index':
         topic_name = 'index'
-
     if topic_name == 'vertices' or topic_name == 'edges' or topic_name == 'index':
         bag_path = f'{output_dir}/graph/{topic_name}'
         os.makedirs(f'{bag_path}', exist_ok=True)
-        
     else:
         bag_path = f'{output_dir}/graph/data/{topic_name}'
         os.makedirs(f'{bag_path}', exist_ok=True)
 
+    # populate .db3s
     if topic_name == 'pointmap':
-        write_metadata_yaml(df, bag_path, topic_name, topic_type, partial)
-        write_rosbag(df, bag_path, topic_name, topic_type, partial)
+        # special case
+        write_metadata_yaml(df, bag_path, topic_name, topic_type, segment_num, partial)
+        write_rosbag(df, bag_path, topic_name, topic_type, segment_num, partial)
         # do the same for pointmap_v0
         topic_name = 'pointmap_v0'
         bag_path = f'{output_dir}/graph/data/{topic_name}'
         os.makedirs(f'{bag_path}', exist_ok=True)
-        write_metadata_yaml(df, bag_path, topic_name, topic_type, partial)
-        write_rosbag(df, bag_path, topic_name, topic_type, partial)
+        write_metadata_yaml(df, bag_path, topic_name, topic_type, segment_num, partial)
+        write_rosbag(df, bag_path, topic_name, topic_type, segment_num, partial)
     else:
-        write_metadata_yaml(df, bag_path, topic_name, topic_type, partial)
-        write_rosbag(df, bag_path, topic_name, topic_type, partial)
+        write_metadata_yaml(df, bag_path, topic_name, topic_type, segment_num, partial)
+        write_rosbag(df, bag_path, topic_name, topic_type, segment_num, partial)
 
-# Get and sort .db3 files numerically
-db_files = sorted(
-    [f for f in os.listdir(chunks_path) if f.endswith('.db3')],
-    key=lambda x: int(x.split('.')[0])
-)
 
-# Extract numeric parts
-nums = [int(f.split('.')[0]) for f in db_files]
+if __name__ == '__main__':
+    # Get and sort .db3 files numerically
+    db_files = sorted(
+        [f for f in os.listdir(chunks_path) if f.endswith('.db3')],
+        key=lambda x: int(x.split('.')[0])
+    )
+    # Extract numeric parts
+    nums = [int(f.split('.')[0]) for f in db_files]
+    # Identify sequential segments
+    segments = []
+    segment = [nums[0]]
+    for i in range(1, len(nums)):
+        if nums[i] == nums[i - 1] + 1:
+            segment.append(nums[i])
+        else:
+            segments.append(segment)
+            segment = [nums[i]]
+    segments.append(segment)
 
-# Identify sequential segments
-segments = []
-segment = [nums[0]]
-
-for i in range(1, len(nums)):
-    if nums[i] == nums[i - 1] + 1:
-        segment.append(nums[i])
+    if len(segments) > 1:
+        partial = True
     else:
-        segments.append(segment)
-        segment = [nums[i]]
-segments.append(segment)
+        partial = False
 
-if len(segments) > 1:
-    partial = True
-else:
-    partial = False
+    # Display results
+    print(f"Total sequential segments: {len(segments)}\n")
 
-# Display results
-print(f"Total sequential segments: {len(segments)}\n")
+    # Tables to recover
+    tables = ['vtr_index','env_info','waypoint_name','vertices','edges','pointmap','pointmap_ptr']
 
-# Tables to recover
-tables = [
-    'vtr_index',
-    'env_info',
-    'waypoint_name',
-    'vertices',
-    'edges',
-    'pointmap',
-    'pointmap_ptr'
-]
+    # Loop over each chunk DB
+    for i, segment in enumerate(segments):
+        # Dictionary to hold chunked tables
+        chunked_data = {table: [] for table in tables}
+        for s in segment:    
+            db_file = str(s) + '.db3'
+            conn = sqlite3.connect(os.path.join(chunks_path, db_file))
+            for table in tables:
+                try:
+                    df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
+                    chunked_data[table].append(df)
+                except Exception as e:
+                    print(f"Warning: Could not read table {table} from {db_file}: {e}")
+            conn.close()
 
-# Loop over each chunk DB
-for i, segment in enumerate(segments):
-    # Dictionary to hold chunked tables
-    chunked_data = {table: [] for table in tables}
-    for s in segment:    
-        db_file = str(s) + '.db3'
+        # Concatenate chunks and sort by timestamp where applicable
+        all_data = {}
+        for table, dfs in chunked_data.items():
+            if dfs:  # make sure there is at least one chunk
+                concatenated = pd.concat(dfs, ignore_index=True)
+                all_data[table] = concatenated
 
-        conn = sqlite3.connect(os.path.join(chunks_path, db_file))
-        for table in tables:
-            try:
-                df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
-                chunked_data[table].append(df)
-            except Exception as e:
-                print(f"Warning: Could not read table {table} from {db_file}: {e}")
+        # Now all_data['vertices'], all_data['edges'], etc. contain fully concatenated tables
+        print(all_data['vertices'].head())
+        print(all_data['edges'].head())
+
+        output_dir = 'reconstructed/0/' + bag_name + '/' + bag_name + '_' + str(i) 
+        print(f'reconstructing segment {i}')
+        os.makedirs(output_dir, exist_ok=True)
+        pdb.set_trace()
         
-        conn.close()
+        for key in all_data.keys():
+            print(f'serializing: {key}')
+            write_rosbag_from_df(all_data[key], output_dir, i, partial)
 
-    # Concatenate chunks and sort by timestamp where applicable
-    all_data = {}
-    for table, dfs in chunked_data.items():
-        if dfs:  # make sure there is at least one chunk
-            concatenated = pd.concat(dfs, ignore_index=True)
-            all_data[table] = concatenated
-
-    # Now all_data['vertices'], all_data['edges'], etc. contain fully concatenated tables
-    print(all_data['vertices'].head())
-    print(all_data['edges'].head())
-
-    output_dir = 'reconstructed/0/' + bag_name + '/' + bag_name + '_' + str(i) 
-    print(f'reconstructing segment {i}')
-    os.makedirs(output_dir, exist_ok=True)
-
-    for key in all_data.keys():
-        print(f'serializing: {key}')
-        write_rosbag_from_df(all_data[key], output_dir, partial)
-
-
-print('done writing')
+    print('done writing')
