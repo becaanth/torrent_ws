@@ -9,7 +9,7 @@ from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
 folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
-bag_name = 'woody_convoy'
+bag_name = 'torrent_test'
 chunk_name =  'deconstructed/0/' + bag_name
 chunks_path = f'{folder_path}/{chunk_name}'
 

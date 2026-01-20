@@ -8,7 +8,7 @@ from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
 folder_path = '/home/asrl/ASRL/vtr3/temp'
-bag_name = 'woody_convoy'
+bag_name = 'torrent_test'
 bag_path = f'{folder_path}/{bag_name}/graph'
 
 """

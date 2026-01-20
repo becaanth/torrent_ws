@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'registry = torrent_pkg.registry:main'
+            'deprecated = torrent_pkg.registry:main',
+            'registry = torrent_pkg.registry_node:main'
         ],
     },
 )
