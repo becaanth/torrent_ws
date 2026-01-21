@@ -47,6 +47,10 @@ reconstructed/<robot_id>/<posegraph_name>/
 
 ## ROS Package: torrent_pkg
 
+## System Overview Diagram
+
+![Registry Diagram](docs/registry_diagram.png)
+
 ### registry_node.py
 
 `RegistryNode` is the main ROS 2 node run on every robot in the fleet.
@@ -124,7 +128,3 @@ Acts as a bridge between the Scheduler and TorrentManager.
   - tracking torrent progress and completion
 
 ---
-
-## System Overview Diagram
-
-![Registry Diagram](docs/registry_diagram.png)
