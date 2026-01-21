@@ -7,7 +7,6 @@ class GossipInterface:
         self._robot_id = robot_id
         self._peer_bitfields: Dict[int, List[bool]] = {}
 
-
     def update_peer(self, peer_id: int, bitfield: List[bool]):
         """update from incoming gossip"""
         if peer_id == self._robot_id:

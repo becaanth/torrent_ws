@@ -33,7 +33,7 @@ from torrent_msgs.srv import GetMagnetURI
 from torrent_msgs.msg import SubmapRegistry
 
 class RegistryNode(Node):
-    def __init__(self, num_robots: int = 2):
+    def __init__(self, num_robots: int = 4):
         super().__init__('registry_node')
 
         self.declare_parameter('robot_id', 0)
