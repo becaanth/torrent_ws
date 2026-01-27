@@ -9,8 +9,8 @@ from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
 folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
-bag_name = 'torrent_test'
-chunk_name =  'deconstructed/0/' + bag_name
+bag_name = 'checksum'
+chunk_name =  'deconstructed/temp/' + bag_name
 chunks_path = f'{folder_path}/{chunk_name}'
 
 """
@@ -62,17 +62,17 @@ def write_metadata_yaml(df, bag_dir, topic_name, topic_type, segment_num, partia
             "message_count": num_messages,
             "topics_with_message_count": [
                 {
-                    "topic_metadata": {
-                        "name": topic_name,
-                        "type": topic_type,
-                        "serialization_format": "cdr",
-                        "offered_qos_profiles": ""
-                    },
-                    "message_count": num_messages
+                "topic_metadata": {
+                    "name": topic_name,
+                    "type": topic_type,
+                    "serialization_format": "cdr",
+                    "offered_qos_profiles": ""
+                },
+                "message_count": num_messages
                 }
             ],
-            "compression_format": "",
-            "compression_mode": ""
+            "compression_format": '',
+            "compression_mode": ''
         }
     }
 
@@ -224,7 +224,7 @@ if __name__ == '__main__':
         print(all_data['vertices'].head())
         print(all_data['edges'].head())
 
-        output_dir = 'reconstructed/0/' + bag_name + '/' + bag_name + '_' + str(i) 
+        output_dir = 'reconstructed/temp/' + bag_name + '/' + bag_name + '_' + str(i) 
         print(f'reconstructing segment {i}')
         os.makedirs(output_dir, exist_ok=True)
         

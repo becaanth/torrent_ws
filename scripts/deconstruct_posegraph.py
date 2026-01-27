@@ -8,7 +8,7 @@ from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
 folder_path = '/home/asrl/ASRL/vtr3/temp'
-bag_name = 'torrent_test'
+bag_name = 'checksum'
 bag_path = f'{folder_path}/{bag_name}/graph'
 
 """
@@ -22,9 +22,14 @@ bag_path = f'{folder_path}/{bag_name}/graph'
     - env_info
 """
 
-def get_teach_vertices(bag_path):
-    which_data = 'vertices'
-    conn = sqlite3.connect(f'{bag_path}/{which_data}/{which_data}_0.db3')
+def get_db3_elements(bag_path, which_data):
+    """
+    Generic read .db3 files to replace bespoke functions
+    """
+    if which_data in ['vertices', 'edges', 'index']:
+        conn = sqlite3.connect(f'{bag_path}/{which_data}/{which_data}_0.db3')
+    else:
+        conn = sqlite3.connect(f'{bag_path}/data/{which_data}/{which_data}_0.db3')
 
     # Merge messages with topic info
     full_df = pd.read_sql_query("""
@@ -38,197 +43,108 @@ def get_teach_vertices(bag_path):
     ORDER BY m.timestamp;
     """, conn)
 
-    # GET TEACH VERTICES
-    v_ids = np.array(())
-    for i in range(len(full_df)):
-        msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-        v_ids = np.append(v_ids, msg.id)
+    if which_data == 'vertices':
+        # get teach vertices
+        v_ids = np.array(())
+        for i in range(len(full_df)):
+            msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
+            v_ids = np.append(v_ids, msg.id)
 
-    teach_vertices_df = full_df[v_ids < 1e6]
-    conn.close()
-    return teach_vertices_df, v_ids[v_ids < 1e6]
-
-def get_teach_edges(bag_path):
-    # GET TEACH EDGES
-    which_data = 'edges'
-    conn = sqlite3.connect(f'{bag_path}/{which_data}/{which_data}_0.db3')
-
-    # Merge messages with topic info
-    full_df = pd.read_sql_query("""
-    SELECT 
-        t.name AS topic_name,
-        t.type AS topic_type,
-        m.timestamp,
-        m.data
-    FROM messages AS m
-    JOIN topics AS t ON m.topic_id = t.id
-    ORDER BY m.timestamp;
-    """, conn)
-
-    to_ids = np.array(())
-    from_ids = np.array(())
-    e_ids = np.array(())
-    for i in range(len(full_df)):
-        msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-        if msg.mode.mode == 1: # taken in manual mode
-            e_ids = np.append(e_ids, i)
-            to_ids = np.append(to_ids, msg._to_id)
-            from_ids = np.append(from_ids, msg._from_id)
-
-    teach_edges_df = full_df.loc[e_ids]
-    conn.close()
-
-    return teach_edges_df, to_ids, from_ids
-
-def get_teach_index(bag_path):
-    which_data = 'index'
-    conn = sqlite3.connect(f'{bag_path}/{which_data}/{which_data}_0.db3')
-
-    # Merge messages with topic info
-    full_df = pd.read_sql_query("""
-    SELECT 
-        t.name AS topic_name,
-        t.type AS topic_type,
-        m.timestamp,
-        m.data
-    FROM messages AS m
-    JOIN topics AS t ON m.topic_id = t.id
-    ORDER BY m.timestamp;
-    """, conn)
-
-    conn.close()
-    return full_df
-
-def get_teach_submaps(bag_path):
-    # GET TEACH SUBMAPS
-    which_data = 'pointmap'
-    conn = sqlite3.connect(f'{bag_path}/data/{which_data}/{which_data}_0.db3')
-    # Merge messages with topic info
-    full_df = pd.read_sql_query("""
-    SELECT 
-        t.name AS topic_name,
-        t.type AS topic_type,
-        m.timestamp,
-        m.data
-    FROM messages AS m
-    JOIN topics AS t ON m.topic_id = t.id
-    ORDER BY m.timestamp;
-    """, conn)
-
-    s_ids = np.array(())
-    for i in range(len(full_df)):
-        msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-        s_ids = np.append(s_ids, msg.vertex_id)
-
-    teach_submaps_df = full_df[s_ids < 1e6]
-    conn.close()
-    return teach_submaps_df, s_ids[s_ids < 1e6]
-
-def get_teach_submap_ptrs(bag_path):
-    # GET TEACH SUBMAPS
-    which_data = 'pointmap_ptr'
-    conn = sqlite3.connect(f'{bag_path}/data/{which_data}/{which_data}_0.db3')
-    # Merge messages with topic info
-    full_df = pd.read_sql_query("""
-    SELECT 
-        t.name AS topic_name,
-        t.type AS topic_type,
-        m.timestamp,
-        m.data
-    FROM messages AS m
-    JOIN topics AS t ON m.topic_id = t.id
-    ORDER BY m.timestamp;
-    """, conn)
-
-    this_vids = np.array(())
-    map_vids = np.array(())
-    for i in range(len(full_df)):
-        msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-        this_vids = np.append(this_vids, msg.this_vid)
-        map_vids = np.append(map_vids, msg.map_vid)
-
-    submap_ptrs_df = full_df[(this_vids + map_vids) < 1e6]
-    conn.close()
-    return submap_ptrs_df, map_vids[map_vids < 1e6]
-
-def get_env_info(bag_path):
-# GET ENV INFO
-    which_data = 'env_info'
-    conn = sqlite3.connect(f'{bag_path}/data/{which_data}/{which_data}_0.db3')
-    # Merge messages with topic info
-    env_info_df = pd.read_sql_query("""
-    SELECT 
-        t.name AS topic_name,
-        t.type AS topic_type,
-        m.timestamp,
-        m.data
-    FROM messages AS m
-    JOIN topics AS t ON m.topic_id = t.id
-    ORDER BY m.timestamp;
-    """, conn)
+        teach_vertices_df = full_df[v_ids < 1e6]
+        res = {
+            'df': teach_vertices_df, 
+            'vertex_ids' : v_ids[v_ids < 1e6]
+        }
     
-    conn.close()
-    return env_info_df
-
-def get_teach_waypoints(bag_path):
-# GET WAYPOINT NAMES
-    which_data = 'waypoint_name'
-    conn = sqlite3.connect(f'{bag_path}/data/{which_data}/{which_data}_0.db3')
-    # Merge messages with topic info
-    waypoint_name_df = pd.read_sql_query("""
-    SELECT 
-        t.name AS topic_name,
-        t.type AS topic_type,
-        m.timestamp,
-        m.data
-    FROM messages AS m
-    JOIN topics AS t ON m.topic_id = t.id
-    ORDER BY m.timestamp;
-    """, conn)
+    elif which_data == 'edges':
+            to_ids, from_ids, e_ids = np.array(()), np.array(()), np.array(())
+            for i in range(len(full_df)):
+                msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
+                if msg.mode.mode == 1: # taken in manual mode
+                    e_ids = np.append(e_ids, i)
+                    to_ids = np.append(to_ids, msg._to_id)
+                    from_ids = np.append(from_ids, msg._from_id)
+            teach_edges_df = full_df.loc[e_ids]
+            res = {
+                'df' : teach_edges_df, 
+                'to_ids' : to_ids, 
+                'from_ids': from_ids
+            }
     
+    elif which_data == 'pointmap':
+        s_ids = np.array(())
+        for i in range(len(full_df)):
+            msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
+            s_ids = np.append(s_ids, msg.vertex_id)
+        teach_submaps_df = full_df[s_ids < 1e6]
+        res = {
+            'df': teach_submaps_df, 
+            'submap_ids' : s_ids[s_ids < 1e6]
+        }
+
+    elif which_data == 'pointmap_ptr':
+        this_vids, map_vids = np.array(()), np.array(())
+        for i in range(len(full_df)):
+            msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
+            this_vids = np.append(this_vids, msg.this_vid)
+            map_vids = np.append(map_vids, msg.map_vid)
+
+        submap_ptrs_df = full_df[(this_vids + map_vids) < 1e6]
+        res = {
+            'df' : submap_ptrs_df,
+            'map_ids' : map_vids[map_vids < 1e6]
+        }
+
+    elif which_data in ['index', 'env_info', 'waypoint_name']:
+        res = {
+            'df' : full_df
+        }
+    
+    else:
+        print('[deconstruct_posegraph]: invalid topic requested')
+
     conn.close()
-    return waypoint_name_df
+    return res
 
-# get vertices, edges, submaps
-tv, vids = get_teach_vertices(bag_path)
-te, to_ids, from_ids = get_teach_edges(bag_path)
-ti = get_teach_index(bag_path)
-submaps, sids = get_teach_submaps(bag_path)
-submap_ptrs, map_vids = get_teach_submap_ptrs(bag_path)
-waypoints = get_teach_waypoints(bag_path)
-env_info = get_env_info(bag_path)
+vertices = get_db3_elements(bag_path, 'vertices')
+edges = get_db3_elements(bag_path, 'edges')
+index = get_db3_elements(bag_path, 'index')
+pointmap = get_db3_elements(bag_path, 'pointmap')
+pointmap_ptr = get_db3_elements(bag_path, 'pointmap_ptr')
+env_info = get_db3_elements(bag_path, 'env_info')
+waypoint_name = get_db3_elements(bag_path, 'waypoint_name')
 
-output_dir = 'deconstructed/0/' + bag_name
+output_dir = 'deconstructed/temp/' + bag_name
 os.makedirs(output_dir, exist_ok=True)
 print(output_dir)
 # write to .db3 vertex chunks
-for i, sid in enumerate(sids):
+for i, sid in enumerate(pointmap['submap_ids']):
     # write a .db3 for each sid
     sid = int(sid)
-    chunk_submap = submaps.loc[[i]] # keep as a df not a Series object
+    chunk_submap = pointmap['df'].loc[[i]] # keep as a df not a Series object
     # map_ids are stored indexwise, find idxs where map_id = sid
-    idxs = np.where(map_vids == sid)[0]
-    chunk_submap_ptrs = submap_ptrs.loc[idxs]
-    chunk_waypoints = waypoints.loc[idxs]
-    chunk_env_info = env_info.loc[idxs]
+    idxs = np.where(pointmap_ptr['map_ids'] == sid)[0]
+    chunk_submap_ptrs = pointmap_ptr['df'].loc[idxs]
+    chunk_waypoints = waypoint_name['df'].loc[idxs]
+    chunk_env_info = env_info['df'].loc[idxs]
     
     # get vertices at these idxs
-    v_mask = np.isin(vids, idxs)
+    v_mask = np.isin(vertices['vertex_ids'], idxs)
     valid_vtx = np.where(v_mask)[0]
     # sort them in ascending order and track idxs
-    sort_vidx = np.argsort(vids[v_mask])
-    chunk_vtxs = tv.loc[valid_vtx[sort_vidx]]
+    sort_vidx = np.argsort(vertices['vertex_ids'][v_mask])
+    chunk_vtxs = vertices['df'].loc[valid_vtx[sort_vidx]]
 
     # get corresponding edges
-    e_mask = np.isin(from_ids, idxs)
+    e_mask = np.isin(edges['from_ids'], idxs)
     valid_edges = np.where(e_mask)[0]
     # sort them in ascending order and track idxs
-    sort_eidx = np.argsort(from_ids[e_mask])
-    chunk_edges = te.loc[valid_edges[sort_eidx]]
+    sort_eidx = np.argsort(edges['from_ids'][e_mask])
+    chunk_edges = edges['df'].loc[valid_edges[sort_eidx]]
 
     # convert df to sql to write to chunkwise db3
     conn = sqlite3.connect(f'{output_dir}/{i}.db3')
-    ti.to_sql('vtr_index', conn, if_exists='replace', index=False) # index is same for all chunks
+    index['df'].to_sql('vtr_index', conn, if_exists='replace', index=False) # index is same for all chunks
     chunk_vtxs.to_sql('vertices', conn, if_exists='replace', index=False)
     chunk_edges.to_sql('edges', conn, if_exists='replace', index=False)
     chunk_env_info.to_sql('env_info', conn, if_exists='replace', index=False)
