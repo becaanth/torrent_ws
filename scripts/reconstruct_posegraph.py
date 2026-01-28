@@ -4,13 +4,20 @@ import numpy as np
 import os
 import yaml
 import pdb
+import argparse
 
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
 folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
-bag_name = 'checksum'
-chunk_name =  'deconstructed/temp/' + bag_name
+
+parser = argparse.ArgumentParser(prog = 'Plot Point Clouds Path',
+                        description = 'Plots point clouds')
+parser.add_argument('-b', '--bag_name', default='none', help="The filepath to the pose graph folder. (Usually /a/path/graph)")      # option that takes a value
+args = parser.parse_args()
+bag_name = args.bag_name
+
+chunk_name =  'deconstructed/0/' + bag_name
 chunks_path = f'{folder_path}/{chunk_name}'
 
 """
@@ -224,7 +231,7 @@ if __name__ == '__main__':
         print(all_data['vertices'].head())
         print(all_data['edges'].head())
 
-        output_dir = 'reconstructed/temp/' + bag_name + '/' + bag_name + '_' + str(i) 
+        output_dir = 'reconstructed/0/' + bag_name + '/' + bag_name + '_' + str(i) 
         print(f'reconstructing segment {i}')
         os.makedirs(output_dir, exist_ok=True)
         

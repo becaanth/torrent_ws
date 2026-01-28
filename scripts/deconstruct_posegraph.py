@@ -2,13 +2,20 @@ import sqlite3
 import pandas as pd
 import numpy as np
 import os
+import argparse
+import argparse
 import pdb
 
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
+parser = argparse.ArgumentParser(prog = 'Plot Point Clouds Path',
+                        description = 'Plots point clouds')
+parser.add_argument('-b', '--bag_name', default='none', help="The filepath to the pose graph folder. (Usually /a/path/graph)")      # option that takes a value
+args = parser.parse_args()
+bag_name = args.bag_name
+
 folder_path = '/home/asrl/ASRL/vtr3/temp'
-bag_name = 'checksum'
 bag_path = f'{folder_path}/{bag_name}/graph'
 
 """
@@ -106,51 +113,52 @@ def get_db3_elements(bag_path, which_data):
     conn.close()
     return res
 
-vertices = get_db3_elements(bag_path, 'vertices')
-edges = get_db3_elements(bag_path, 'edges')
-index = get_db3_elements(bag_path, 'index')
-pointmap = get_db3_elements(bag_path, 'pointmap')
-pointmap_ptr = get_db3_elements(bag_path, 'pointmap_ptr')
-env_info = get_db3_elements(bag_path, 'env_info')
-waypoint_name = get_db3_elements(bag_path, 'waypoint_name')
+if __name__ == '__main__':
+    vertices = get_db3_elements(bag_path, 'vertices')
+    edges = get_db3_elements(bag_path, 'edges')
+    index = get_db3_elements(bag_path, 'index')
+    pointmap = get_db3_elements(bag_path, 'pointmap')
+    pointmap_ptr = get_db3_elements(bag_path, 'pointmap_ptr')
+    env_info = get_db3_elements(bag_path, 'env_info')
+    waypoint_name = get_db3_elements(bag_path, 'waypoint_name')
 
-output_dir = 'deconstructed/temp/' + bag_name
-os.makedirs(output_dir, exist_ok=True)
-print(output_dir)
-# write to .db3 vertex chunks
-for i, sid in enumerate(pointmap['submap_ids']):
-    # write a .db3 for each sid
-    sid = int(sid)
-    chunk_submap = pointmap['df'].loc[[i]] # keep as a df not a Series object
-    # map_ids are stored indexwise, find idxs where map_id = sid
-    idxs = np.where(pointmap_ptr['map_ids'] == sid)[0]
-    chunk_submap_ptrs = pointmap_ptr['df'].loc[idxs]
-    chunk_waypoints = waypoint_name['df'].loc[idxs]
-    chunk_env_info = env_info['df'].loc[idxs]
-    
-    # get vertices at these idxs
-    v_mask = np.isin(vertices['vertex_ids'], idxs)
-    valid_vtx = np.where(v_mask)[0]
-    # sort them in ascending order and track idxs
-    sort_vidx = np.argsort(vertices['vertex_ids'][v_mask])
-    chunk_vtxs = vertices['df'].loc[valid_vtx[sort_vidx]]
+    output_dir = 'deconstructed/0/' + bag_name
+    os.makedirs(output_dir, exist_ok=True)
+    print(output_dir)
+    # write to .db3 vertex chunks
+    for i, sid in enumerate(pointmap['submap_ids']):
+        # write a .db3 for each sid
+        sid = int(sid)
+        chunk_submap = pointmap['df'].loc[[i]] # keep as a df not a Series object
+        # map_ids are stored indexwise, find idxs where map_id = sid
+        idxs = np.where(pointmap_ptr['map_ids'] == sid)[0]
+        chunk_submap_ptrs = pointmap_ptr['df'].loc[idxs]
+        chunk_waypoints = waypoint_name['df'].loc[idxs]
+        chunk_env_info = env_info['df'].loc[idxs]
+        
+        # get vertices at these idxs
+        v_mask = np.isin(vertices['vertex_ids'], idxs)
+        valid_vtx = np.where(v_mask)[0]
+        # sort them in ascending order and track idxs
+        sort_vidx = np.argsort(vertices['vertex_ids'][v_mask])
+        chunk_vtxs = vertices['df'].loc[valid_vtx[sort_vidx]]
 
-    # get corresponding edges
-    e_mask = np.isin(edges['from_ids'], idxs)
-    valid_edges = np.where(e_mask)[0]
-    # sort them in ascending order and track idxs
-    sort_eidx = np.argsort(edges['from_ids'][e_mask])
-    chunk_edges = edges['df'].loc[valid_edges[sort_eidx]]
+        # get corresponding edges
+        e_mask = np.isin(edges['from_ids'], idxs)
+        valid_edges = np.where(e_mask)[0]
+        # sort them in ascending order and track idxs
+        sort_eidx = np.argsort(edges['from_ids'][e_mask])
+        chunk_edges = edges['df'].loc[valid_edges[sort_eidx]]
 
-    # convert df to sql to write to chunkwise db3
-    conn = sqlite3.connect(f'{output_dir}/{i}.db3')
-    index['df'].to_sql('vtr_index', conn, if_exists='replace', index=False) # index is same for all chunks
-    chunk_vtxs.to_sql('vertices', conn, if_exists='replace', index=False)
-    chunk_edges.to_sql('edges', conn, if_exists='replace', index=False)
-    chunk_env_info.to_sql('env_info', conn, if_exists='replace', index=False)
-    chunk_waypoints.to_sql('waypoint_name', conn, if_exists='replace', index=False)
-    chunk_submap.to_sql('pointmap', conn, if_exists='replace', index=False)
-    chunk_submap_ptrs.to_sql('pointmap_ptr', conn, if_exists='replace', index=False)
-    conn.close()
+        # convert df to sql to write to chunkwise db3
+        conn = sqlite3.connect(f'{output_dir}/{i}.db3')
+        index['df'].to_sql('vtr_index', conn, if_exists='replace', index=False) # index is same for all chunks
+        chunk_vtxs.to_sql('vertices', conn, if_exists='replace', index=False)
+        chunk_edges.to_sql('edges', conn, if_exists='replace', index=False)
+        chunk_env_info.to_sql('env_info', conn, if_exists='replace', index=False)
+        chunk_waypoints.to_sql('waypoint_name', conn, if_exists='replace', index=False)
+        chunk_submap.to_sql('pointmap', conn, if_exists='replace', index=False)
+        chunk_submap_ptrs.to_sql('pointmap_ptr', conn, if_exists='replace', index=False)
+        conn.close()
 
-print(f'done deconstructing {bag_name}')
+    print(f'done deconstructing {bag_name}')
