@@ -80,8 +80,6 @@ print('waypoint_name:    ', bool_waypoint_name)
 print('pointmap:    ', bool_pointmap)
 print('pointmap_ptr:    ', bool_pointmap_ptr)
 
-pdb.set_trace()
-
 plt.plot(range(len(v_o)), v_o, label='original')
 plt.plot(range(len(v_r)), v_r, label='reconstructed')
 plt.xlabel('index in .db3')
