@@ -46,12 +46,13 @@ class RegistryNode(Node):
         self.declare_parameter('base_path', '/home/asrl/ASRL/vtr3/torrent_ws')
         base_path = self.get_parameter('base_path').value
 
-        self.declare_parameter('bag_name', 'None')
+        self.declare_parameter('bag_name', '')
         bag_name = self.get_parameter('bag_name').value
-
+        
         self.pieces_path = (
             f'{base_path}/deconstructed/{self.robot_id}/{bag_name}'
         )
+        print(f'[init]: reading from pieces path {self.pieces_path}')
         os.makedirs(self.pieces_path, exist_ok=True)
 
         # Core State (interface with filesystem)

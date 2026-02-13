@@ -3,3 +3,4 @@ deconstructed/*
 build/*
 log/*
 install/*
+libtorrent/*
