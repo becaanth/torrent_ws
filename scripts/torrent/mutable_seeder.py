@@ -101,6 +101,7 @@ if __name__ == "__main__":
     print(ses.listen_port())
 
     # callback loop
+    start_flag = False
     while True:
         if has_new_file(path):
             print("New file added!")
@@ -115,9 +116,17 @@ if __name__ == "__main__":
                 "save_path" : os.path.dirname(path)
             })
             payload = msgpack.packb(mutable_item, use_bin_type=True)
+            start_flag = True
+        
+        if start_flag:
             with zenoh.open(zenoh.Config()) as session:
                 session.put(f"mutable_items/{ROBOT_ID}", payload)
-            # alerts
-            # for a in ses.pop_alerts():
-            #     print(a)
-            time.sleep(1)
+                
+        if start_flag:
+            s = h.status()
+            print(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
+    
+        # alerts
+        # for a in ses.pop_alerts():
+        #     print(a)
+        time.sleep(5)

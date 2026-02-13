@@ -3,7 +3,9 @@ import libtorrent as lt
 import time
 import zenoh
 import msgpack
+import threading
 import pdb
+from queue import Queue
 
 ROBOT_ID = 'prof_plum'
 ROBOT_IPS = {
@@ -15,33 +17,30 @@ ROBOT_IPS = {
 
 MY_IP = ROBOT_IPS[ROBOT_ID]
 
-z = zenoh.open(zenoh.Config())
+message_queue = Queue()
 
-def on_sample(sample, mutable_item, ses):
-    # Decode payload
+def on_sample(sample):
+    print('Received Zenoh message')
+    message_queue.put(sample)
+
+z = zenoh.open(zenoh.Config())
+sub = z.declare_subscriber("mutable_items/**", on_sample)
+
+def on_mutable_item(sample, mutable_item):
+    # Decode payload, update mutable_item
     zenoh_item = msgpack.unpackb(bytes(sample.payload), raw=False)
 
     mutable_item['pubkey'] = zenoh_item.get('pubkey')
     mutable_item['infohash'] = zenoh_item.get('infohash')
     mutable_item['seq'] = zenoh_item.get('seq')
     mutable_item['ip'] = zenoh_item.get('ip')
-    print(f"New mutable item: \n{mutable_to_string(mutable_item)}")
 
-    if mutable_item['pubkey'] != b'1':
-            # Add torrent by infohash + peer IP
-            print('adding torrent')
-            h = ses.add_torrent({
-                'info_hash': mutable_item['infohash'],
-                'save_path': '/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/2/woody_convoy',
-                'peers': [("172.18.0.2", 6881)]
-            })
-    s = h.status()
-    print(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
-    
-    # return mutable_item
+    return mutable_item
 
 def mutable_to_string(mutable_item):
     return f"key: {mutable_item['pubkey']}\n salt: {mutable_item['salt']} \n seq: {mutable_item['seq']} \n infohash: {mutable_item['infohash']} \n my IP: {mutable_item['my_ip']}"
+
+# ======================================================
 
 if __name__ == "__main__":
     salt = "submaps" #input("Salt (dataset id): ").strip()
@@ -63,12 +62,39 @@ if __name__ == "__main__":
         )
     })
 
-    # Monitor
-    while True:
-        with zenoh.open(zenoh.Config()) as session:
-            with session.declare_subscriber("mutable_items/**") as subscriber:
-                for sample in subscriber:
-                    on_sample(sample, mutable_item, ses)
-        
+    old_infohash = mutable_item['infohash']
+    # Process messages in main thread
+    try:
+        while True:
+            # Check for new messages (non-blocking)
+            if not message_queue.empty():
+                sample = message_queue.get()
+                
+                mutable_item = on_mutable_item(sample, mutable_item)
+                print(f"New mutable item: \n{mutable_to_string(mutable_item)}")
+                
+                # i.e. if new infohash
+                if mutable_item['pubkey'] != old_infohash: 
+                    print(f"adding torrent {mutable_item['infohash']} | {mutable_item['infohash']}")
+                    for handle in ses.get_torrents():
+                        ses.remove_torrent(handle)
+                    
+                    h = ses.add_torrent({
+                        'info_hash': mutable_item['infohash'],
+                        'save_path': '/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/2/woody_convoy',
+                        'peers': [("172.18.0.2", 6881)]
+                    })
+                    
+                    s = h.status()
+                    print(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
+                    old_infohash = mutable_item['infohash'] # dont duplicate torrent handles
 
-        time.sleep(1)  
+            # Monitor existing torrents
+            for handle in ses.get_torrents():
+                s = handle.status()
+                print(f"[{handle.info_hash()}] Progress: {s.progress*100:.1f}%")
+            
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        print("\nExiting...")
