@@ -43,6 +43,10 @@ def create_snapshot(path):
     lt.add_files(fs, path)
 
     t = lt.create_torrent(fs)
+    
+    PIECE_SIZE = 2 * 1024 * 1024 # padding
+    t.piece_size(PIECE_SIZE)
+
     lt.set_piece_hashes(t, os.path.dirname(path))
 
     ti = lt.torrent_info(t.generate())
@@ -102,6 +106,7 @@ if __name__ == "__main__":
 
     # callback loop
     start_flag = False
+    os.makedirs(path, exist_ok=True)
     while True:
         if has_new_file(path):
             print("New file added!")

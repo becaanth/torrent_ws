@@ -4,6 +4,7 @@ import numpy as np
 import os
 import argparse
 import argparse
+import time
 import pdb
 
 from rclpy.serialization import deserialize_message
@@ -16,6 +17,8 @@ args = parser.parse_args()
 bag_name = args.bag_name
 
 folder_path = '/home/asrl/ASRL/vtr3/temp'
+agent = f"{0}"
+deconstructed_path = f'/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/{agent}/'
 bag_path = f'{folder_path}/{bag_name}/graph'
 
 """
@@ -113,6 +116,29 @@ def get_db3_elements(bag_path, which_data):
     conn.close()
     return res
 
+
+def pad_file_to_exact_size(path, target_size):
+    # IMPORTANT: stat AFTER sqlite connection is closed
+    current_size = os.path.getsize(path)
+
+    if current_size > target_size:
+        raise RuntimeError(
+            f"{path} too large: {current_size} > {target_size}"
+        )
+
+    missing = target_size - current_size
+    if missing == 0:
+        return
+
+    with open(path, "ab") as f:
+        f.write(b"\x00" * missing)
+
+    # sanity check
+    final_size = os.path.getsize(path)
+    assert final_size == target_size, (
+        f"padding failed: {final_size} != {target_size}"
+    )
+
 if __name__ == '__main__':
     vertices = get_db3_elements(bag_path, 'vertices')
     edges = get_db3_elements(bag_path, 'edges')
@@ -122,11 +148,13 @@ if __name__ == '__main__':
     env_info = get_db3_elements(bag_path, 'env_info')
     waypoint_name = get_db3_elements(bag_path, 'waypoint_name')
 
-    output_dir = 'deconstructed/0/' + bag_name
+    output_dir = deconstructed_path + bag_name
     os.makedirs(output_dir, exist_ok=True)
-    print(output_dir)
+    print(f'Output Directory: {output_dir}')
+
     # write to .db3 vertex chunks
     for i, sid in enumerate(pointmap['submap_ids']):
+        db_path = f'{output_dir}/{i}.db3'
         # write a .db3 for each sid
         sid = int(sid)
         chunk_submap = pointmap['df'].loc[[i]] # keep as a df not a Series object
@@ -151,7 +179,7 @@ if __name__ == '__main__':
         chunk_edges = edges['df'].loc[valid_edges[sort_eidx]]
 
         # convert df to sql to write to chunkwise db3
-        conn = sqlite3.connect(f'{output_dir}/{i}.db3')
+        conn = sqlite3.connect(db_path)
         index['df'].to_sql('vtr_index', conn, if_exists='replace', index=False) # index is same for all chunks
         chunk_vtxs.to_sql('vertices', conn, if_exists='replace', index=False)
         chunk_edges.to_sql('edges', conn, if_exists='replace', index=False)
@@ -160,5 +188,10 @@ if __name__ == '__main__':
         chunk_submap.to_sql('pointmap', conn, if_exists='replace', index=False)
         chunk_submap_ptrs.to_sql('pointmap_ptr', conn, if_exists='replace', index=False)
         conn.close()
+
+        # pad to piece_size
+        PIECE_SIZE = 2 * 1024 * 1024 # 2 MiB - 4 byte SQL overhead
+        pad_file_to_exact_size(db_path, PIECE_SIZE)
+        time.sleep(1)
 
     print(f'done deconstructing {bag_name}')
