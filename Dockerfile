@@ -46,7 +46,8 @@ RUN cp ~/libtorrent/build/bindings/python/libtorrent*.so /usr/local/lib/python3.
 #  Install Zenoh router (zenohd)
 RUN echo "deb [trusted=yes] https://download.eclipse.org/zenoh/debian-repo/ /" | tee -a /etc/apt/sources.list > /dev/null && \
     apt-get update && \
-    apt-get install -y zenoh
+    apt-get install -y zenoh \
+    apt-get install -y zenoh-cli
 
 RUN pip3 install pynacl eclipse-zenoh msgpack
 
