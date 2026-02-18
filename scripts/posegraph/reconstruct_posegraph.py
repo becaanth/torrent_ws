@@ -13,7 +13,7 @@ folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
 
 parser = argparse.ArgumentParser(prog = 'Plot Point Clouds Path',
                         description = 'Plots point clouds')
-parser.add_argument('-b', '--bag_name', default='none', help="The filepath to the pose graph folder. (Usually /a/path/graph)")      # option that takes a value
+parser.add_argument('-b', '--bag_name', default='none', help="The posegraph name")      # option that takes a value
 args = parser.parse_args()
 bag_name = args.bag_name
 

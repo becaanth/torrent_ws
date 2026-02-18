@@ -192,6 +192,6 @@ if __name__ == '__main__':
         # pad to piece_size
         PIECE_SIZE = 2 * 1024 * 1024 # 2 MiB - 4 byte SQL overhead
         pad_file_to_exact_size(db_path, PIECE_SIZE)
-        time.sleep(1)
+        # time.sleep(1)
 
     print(f'done deconstructing {bag_name}')
