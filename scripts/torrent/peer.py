@@ -7,7 +7,12 @@ import threading
 import pdb
 from queue import Queue
 
-ROBOT_ID = 'prof_plum'
+TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
+BAG = "woody_convoy"
+PATH = f"{TORRENT_WS}/deconstructed/1/"
+STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
+
+ROBOT_ID = 'torrent1'
 ROBOT_IPS = {
     'mr_green':'192.168.2.42',
     'prof_plum':'192.168.3.42',
@@ -15,7 +20,13 @@ ROBOT_IPS = {
     'mrs_peacock':'192.168.5.42' 
     }
 
-MY_IP = ROBOT_IPS[ROBOT_ID]
+# Anthonys laptop
+DOCKER_IPS = {
+    'torrent':'172.18.0.3',
+    'torrent1':'172.18.0.4'
+}
+
+MY_IP = DOCKER_IPS[ROBOT_ID]
 
 message_queue = Queue()
 
@@ -55,13 +66,21 @@ if __name__ == "__main__":
 
     # Create session
     ses = lt.session({
-        'listen_interfaces': '172.18.0.3:6881,[::]:6881',
+        "listen_interfaces": f"{MY_IP}:6881,[::]:6881",
         'enable_dht': False,
         'alert_mask': (
             lt.alert.category_t.all_categories
         )
     })
 
+    peers = []
+    port = 6881
+    for key in ROBOT_IPS.keys():
+        if key != ROBOT_ID:
+            peers.append((ROBOT_IPS[key], port))
+
+    pdb.set_trace
+    print(f"peers: {peers}")
     old_infohash = mutable_item['infohash']
     # Process messages in main thread
     try:
@@ -81,8 +100,8 @@ if __name__ == "__main__":
                     
                     h = ses.add_torrent({
                         'info_hash': mutable_item['infohash'],
-                        'save_path': '/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/2/woody_convoy',
-                        'peers': [("172.18.0.2", 6881)]
+                        'save_path': PATH,
+                        'peers': peers
                     })
                     
                     s = h.status()

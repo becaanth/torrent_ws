@@ -8,8 +8,12 @@ import json
 import msgpack
 import pdb
 
-STATE_FILE = "mutable_state.json"
-ROBOT_ID = 'mr_green'
+TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
+BAG = "woody_convoy"
+PATH = f"{TORRENT_WS}/deconstructed/0/{BAG}"
+STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
+
+ROBOT_ID = 'torrent'
 ROBOT_IPS = {
     'mr_green':'192.168.2.42',
     'prof_plum':'192.168.3.42',
@@ -17,7 +21,13 @@ ROBOT_IPS = {
     'mrs_peacock':'192.168.5.42' 
     }
 
-MY_IP = ROBOT_IPS[ROBOT_ID]
+# Anthonys laptop
+DOCKER_IPS = {
+    'torrent':'172.18.0.3',
+    'torrent1':'172.18.0.4'
+}
+
+MY_IP = DOCKER_IPS[ROBOT_ID]
 
 # -------------------------
 # Persistence
@@ -81,7 +91,7 @@ def mutable_to_string(mutable_item):
 if __name__ == "__main__":
     print(f"my IP: {MY_IP}")
 
-    path = "/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/0/woody_convoy" #input("Directory to seed: ").strip()
+    path = PATH #input("Directory to seed: ").strip()
     salt = "submaps" #input("Salt (dataset id): ").strip()
     state = load_state()
     sk = SigningKey(bytes.fromhex(state["sk"]))
@@ -96,7 +106,7 @@ if __name__ == "__main__":
 
     # initiate torrent session
     ses = lt.session({
-        "listen_interfaces": "172.18.0.2:6881,[::]:6881",
+        "listen_interfaces": f"{MY_IP}:6881,[::]:6881",
         "enable_dht": False,
         "alert_mask": (
             lt.alert.category_t.all_categories
