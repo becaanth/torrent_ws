@@ -59,7 +59,7 @@ def on_mutable_item(sample, mutable_item):
     return mutable_item
 
 def mutable_to_string(mutable_item):
-    return f"key: {mutable_item['pubkey']}\n salt: {mutable_item['salt']} \n seq: {mutable_item['seq']} \n infohash: {mutable_item['infohash']} \n my IP: {mutable_item['my_ip']}"
+    return f"\tkey: {mutable_item['pubkey']}\n \tsalt: {mutable_item['salt']} \n \tseq: {mutable_item['seq']} \n \tinfohash: {mutable_item['infohash']} \n \tmy IP: {mutable_item['my_ip']}"
 
 # ======================================================
 
@@ -89,7 +89,6 @@ if __name__ == "__main__":
         if key != params['robot_id']:
             peers.append((ROBOT_IPS[key], port))
 
-    print(f"peers: {peers}")
     old_infohash = mutable_item['infohash']
 
     # Configure Zenoh
@@ -112,6 +111,10 @@ if __name__ == "__main__":
     session = zenoh.open(cfg)
     sub = session.declare_subscriber("mutable_items/**", on_sample)
 
+    print(f"my IP: {MY_IP}")
+    print(f"listening on {ses.listen_port()}")
+    print("params: ",  params)
+
     # Process messages in main thread
     try:
         while True:
@@ -120,11 +123,11 @@ if __name__ == "__main__":
                 sample = message_queue.get()
                 
                 mutable_item = on_mutable_item(sample, mutable_item)
-                print(f"New mutable item: \n{mutable_to_string(mutable_item)}")
+                print(f"[zenoh]: new mutable item") #: \n{mutable_to_string(mutable_item)}")
                 
                 # i.e. if new infohash
                 if mutable_item['pubkey'] != old_infohash: 
-                    print(f"adding torrent {mutable_item['infohash']} | {mutable_item['infohash']}")
+                    print(f"[torrent]: adding {mutable_item['infohash']}")
                     for handle in ses.get_torrents():
                         ses.remove_torrent(handle)
                     
@@ -135,7 +138,7 @@ if __name__ == "__main__":
                     })
                     
                     s = h.status()
-                    print(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
+                    # print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
                     old_infohash = mutable_item['infohash'] # dont duplicate torrent handles
 
             # Monitor existing torrents

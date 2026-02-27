@@ -97,13 +97,12 @@ def has_new_file(directory, last_count=[0]):
     return False
 
 def mutable_to_string(mutable_item):
-    return f"key: {mutable_item['pubkey']}\n salt: {mutable_item['salt']} \n seq: {mutable_item['seq']} \n infohash: {mutable_item['infohash']} \n my IP: {mutable_item['my_ip']}"
+    return f"\tkey: {mutable_item['pubkey']}\n \tsalt: {mutable_item['salt']} \n \tseq: {mutable_item['seq']} \n \tinfohash: {mutable_item['infohash']} \n \tmy IP: {mutable_item['my_ip']}"
 
 
 # ======================================================
 
 if __name__ == "__main__":
-    print(f"my IP: {MY_IP}")
 
     path = PATH #input("Directory to seed: ").strip()
     salt = "submaps" #input("Salt (dataset id): ").strip()
@@ -126,7 +125,6 @@ if __name__ == "__main__":
             lt.alert.category_t.all_categories
         ),
     })
-    print(ses.listen_port())
 
     # cfg = zenoh.Config.from_file("hunter2_zenoh.json5")
 
@@ -144,30 +142,37 @@ if __name__ == "__main__":
     cfg.insert_json5("listen/endpoints", "[]")
     session = zenoh.open(cfg)
 
+    # print
+    print(f"my IP: {MY_IP}")
+    print(f"listening on {ses.listen_port()}")
+    print("params: ",  params)
+
     # callback loop
     start_flag = False
     os.makedirs(path, exist_ok=True)
     try: 
         while True:
+            start = time.time()
             if has_new_file(path):
-                print("New file added!")
+                start_flag = True
+                print("[deconstructed]: new file")
                 # Create snapshot
                 ti = create_snapshot(path)
                 infohash = ti.info_hash()
                 mutable_item['infohash'] = infohash.to_bytes()
                 mutable_item['seq']+=1
-                print(f"New mutable item: \n{mutable_to_string(mutable_item)}")
+                print(f"[torrent] adding mutable item: {mutable_item['infohash']}") #\n{mutable_to_string(mutable_item)}")
                 h = ses.add_torrent({
                     "ti" : ti,
                     "save_path" : os.path.dirname(path)
                 })
                 payload = msgpack.packb(mutable_item, use_bin_type=True)
-                start_flag = True
-                session.put(f"mutable_items/{params['robot_id']}", payload)
                     
             if start_flag:
+                print("[zenoh]: pub mutable item")
+                session.put(f"mutable_items/{params['robot_id']}", payload)            
                 s = h.status()
-                print(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
+                print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
         
             # alerts
             # for a in ses.pop_alerts():
@@ -177,3 +182,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nExiting...")
         session.close()
+        print(f'time from first payload until killed: {time.time() - start}')
