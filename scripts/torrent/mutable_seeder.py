@@ -89,12 +89,15 @@ def has_new_file(directory, last_count=[0]):
     Check if file count has increased. True if new file added
     """
     current_count = len(os.listdir(directory))
-    
     if current_count > last_count[0]:
         last_count[0] = current_count
+        tf = True
         return True
-    
-    return False
+    else:
+        tf = False
+
+    print(f'Is there a new file? {tf}')    
+    return tf
 
 def mutable_to_string(mutable_item):
     return f"\tkey: {mutable_item['pubkey']}\n \tsalt: {mutable_item['salt']} \n \tseq: {mutable_item['seq']} \n \tinfohash: {mutable_item['infohash']} \n \tmy IP: {mutable_item['my_ip']}"
@@ -186,5 +189,5 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
         print("\nExiting...")
-        session.close()
         print(f'time from callback until killed: {time.time() - start}')
+        session.close()
