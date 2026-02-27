@@ -16,16 +16,6 @@ try:
 except:
     print("can't open params, navigate to torrent_ws")
 
-if params['device'] == 'docker':
-    TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
-elif params['device'] == 'hunter':
-    TORRENT_WS = "/home/indro/ASRL/vtr3/torrent_ws"
-else:
-    print('bad params')
-    
-PATH = f"{TORRENT_WS}/deconstructed/1/{params['posegraph']}"
-STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
-
 ROBOT_IPS = {
     'mr_green':'192.168.2.42',
     'prof_plum':'192.168.3.42',
@@ -39,7 +29,17 @@ DOCKER_IPS = {
     'torrent1':'172.18.0.4'
 }
 
-MY_IP = DOCKER_IPS[params['robot_id']]
+if params['device'] == 'docker':
+    TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
+    MY_IP = DOCKER_IPS[params['robot_id']]
+elif params['device'] == 'hunter':
+    TORRENT_WS = "/home/indro/ASRL/vtr3/torrent_ws"
+    MY_IP = ROBOT_IPS[params['robot_id']]
+else:
+    print('bad params')
+
+PATH = f"{TORRENT_WS}/deconstructed/1/{params['posegraph']}"
+STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
 
 message_queue = Queue()
 
