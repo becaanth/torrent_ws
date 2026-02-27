@@ -4,3 +4,4 @@ build/*
 log/*
 install/*
 libtorrent/*
+scripts/torrent/*.json

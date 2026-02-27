@@ -4,15 +4,17 @@ import time
 import zenoh
 import msgpack
 import threading
-import pdb
+import json
 from queue import Queue
+import os
+import pdb
 
-params = {
-    'posegraph': 'woody_convoy',
-    'robot_id' : 'torrent1',
-    'device'   : 'docker', # 'docker' or 'hunter'
-    'router'   : 'zenohd'
-}
+try:
+    if os.path.exists('scripts/torrent/peer_params.json'):
+        with open('scripts/torrent/peer_params.json', "r") as f:
+            params =  json.load(f)
+except:
+    print("can't open params, navigate to torrent_ws")
 
 if params['device'] == 'docker':
     TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"

@@ -9,12 +9,12 @@ import msgpack
 import argparse
 import pdb
 
-params = {
-    'posegraph': 'woody_convoy',
-    'robot_id' : 'torrent',
-    'device'   : 'docker', # 'docker' or 'hunter'
-    'router'   : 'zenohd'
-}
+try:
+    if os.path.exists('scripts/torrent/seeder_params.json'):
+        with open('scripts/torrent/seeder_params.json', "r") as f:
+            params =  json.load(f)
+except:
+    print("can't open params, navigate to torrent_ws")
 
 if params['device'] == 'docker':
     TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
