@@ -9,12 +9,17 @@ import msgpack
 import argparse
 import pdb
 
+params = {
+    'posegraph': 'woody_convoy',
+    'robot_id' : 'torrent',
+    'device'   : 'docker', # 'docker' or 'hunter'
+    'router'   : 'zenohd'
+}
+
 TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
-POSEGRAPH = "woody_convoy"
-PATH = f"{TORRENT_WS}/deconstructed/0/{POSEGRAPH}"
+PATH = f"{TORRENT_WS}/deconstructed/0/{params['posegraph']}"
 STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
 
-ROBOT_ID = 'torrent'
 ROBOT_IPS = {
     'mr_green':'192.168.2.42',
     'prof_plum':'192.168.3.42',
@@ -28,7 +33,7 @@ DOCKER_IPS = {
     'torrent1':'172.18.0.4'
 }
 
-MY_IP = DOCKER_IPS[ROBOT_ID]
+MY_IP = DOCKER_IPS[params['robot_id']]
 
 # -------------------------
 # Persistence
@@ -116,13 +121,17 @@ if __name__ == "__main__":
     print(ses.listen_port())
 
     # cfg = zenoh.Config.from_file("hunter2_zenoh.json5")
-    cfg = zenoh.Config()
+
+    if params['device'] == 'docker':
+        cfg = zenoh.Config()
+        tcp = '["tcp/'+ params['router'] + ':7447"]'
+        cfg.insert_json5(
+            "connect/endpoints",
+            tcp
+        )
+
     cfg.insert_json5("mode", '"client"')
     cfg.insert_json5("listen/endpoints", "[]")
-    cfg.insert_json5(
-        "connect/endpoints",
-        '["tcp/zenohd:7447"]'
-    )
     session = zenoh.open(cfg)
 
     # callback loop
@@ -144,7 +153,7 @@ if __name__ == "__main__":
                 })
                 payload = msgpack.packb(mutable_item, use_bin_type=True)
                 start_flag = True
-                session.put(f"mutable_items/{ROBOT_ID}", payload)
+                session.put(f"mutable_items/{params['robot_id']}", payload)
                     
             if start_flag:
                 s = h.status()
@@ -154,6 +163,6 @@ if __name__ == "__main__":
             # for a in ses.pop_alerts():
             #     print(a)
             time.sleep(5)
-            
+
     except KeyboardInterrupt:
         print("\nExiting...")

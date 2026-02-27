@@ -7,12 +7,17 @@ import threading
 import pdb
 from queue import Queue
 
+params = {
+    'posegraph': 'woody_convoy',
+    'robot_id' : 'torrent1',
+    'device'   : 'docker', # 'docker' or 'hunter'
+    'router'   : 'zenohd'
+}
+
 TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
-POSEGRAPH = "woody_convoy"
-PATH = f"{TORRENT_WS}/deconstructed/1/"
+PATH = f"{TORRENT_WS}/deconstructed/1/{params['posegraph']}"
 STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
 
-ROBOT_ID = 'torrent1'
 ROBOT_IPS = {
     'mr_green':'192.168.2.42',
     'prof_plum':'192.168.3.42',
@@ -26,29 +31,13 @@ DOCKER_IPS = {
     'torrent1':'172.18.0.4'
 }
 
-MY_IP = DOCKER_IPS[ROBOT_ID]
+MY_IP = DOCKER_IPS[params['robot_id']]
 
 message_queue = Queue()
 
 def on_sample(sample):
     print('Received Zenoh message')
     message_queue.put(sample)
-
-# cfg = zenoh.Config.from_file("hunter2_zenoh.json5")
-cfg = zenoh.Config()
-# cfg.insert_json5("listen/endpoints", "[]")
-# cfg.insert_json5("mode", '"client"')
-
-cfg = zenoh.Config()
-cfg.insert_json5("mode", '"client"')
-cfg.insert_json5("listen/endpoints", "[]")
-cfg.insert_json5(
-    "connect/endpoints",
-    '["tcp/zenohd:7447"]'
-)
-session = zenoh.open(cfg)
-
-sub = session.declare_subscriber("mutable_items/**", on_sample)
 
 def on_mutable_item(sample, mutable_item):
     # Decode payload, update mutable_item
@@ -89,11 +78,30 @@ if __name__ == "__main__":
     peers = []
     port = 6881
     for key in ROBOT_IPS.keys():
-        if key != ROBOT_ID:
+        if key != params['robot_id']:
             peers.append((ROBOT_IPS[key], port))
 
     print(f"peers: {peers}")
     old_infohash = mutable_item['infohash']
+
+    # Configure Zenoh
+    # cfg = zenoh.Config.from_file("hunter2_zenoh.json5")
+    cfg = zenoh.Config()
+    # cfg.insert_json5("listen/endpoints", "[]")
+    # cfg.insert_json5("mode", '"client"')
+    if params['device'] == 'docker':
+        cfg = zenoh.Config()
+        tcp = '["tcp/'+ params['router'] + ':7447"]'
+        cfg.insert_json5(
+            "connect/endpoints",
+            tcp
+        )
+
+    cfg.insert_json5("mode", '"client"')
+    cfg.insert_json5("listen/endpoints", "[]")
+    session = zenoh.open(cfg)
+    sub = session.declare_subscriber("mutable_items/**", on_sample)
+
     # Process messages in main thread
     try:
         while True:
