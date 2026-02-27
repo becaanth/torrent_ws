@@ -128,7 +128,7 @@ if __name__ == "__main__":
                 print(f"[zenoh]: new mutable item") #: \n{mutable_to_string(mutable_item)}")
                 
                 # i.e. if new infohash
-                if mutable_item['pubkey'] != old_infohash: 
+                if mutable_item['infohash'] != old_infohash: 
                     print(f"[torrent]: adding {mutable_item['infohash']}")
                     for handle in ses.get_torrents():
                         ses.remove_torrent(handle)

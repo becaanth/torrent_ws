@@ -92,7 +92,6 @@ def has_new_file(directory, last_count=[0]):
     if current_count > last_count[0]:
         last_count[0] = current_count
         tf = True
-        return True
     else:
         tf = False
 
