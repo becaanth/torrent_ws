@@ -6,11 +6,12 @@ import zenoh
 import os
 import json
 import msgpack
+import argparse
 import pdb
 
 TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
-BAG = "woody_convoy"
-PATH = f"{TORRENT_WS}/deconstructed/0/{BAG}"
+POSEGRAPH = "woody_convoy"
+PATH = f"{TORRENT_WS}/deconstructed/0/{POSEGRAPH}"
 STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
 
 ROBOT_ID = 'torrent'
@@ -114,34 +115,45 @@ if __name__ == "__main__":
     })
     print(ses.listen_port())
 
+    # cfg = zenoh.Config.from_file("hunter2_zenoh.json5")
+    cfg = zenoh.Config()
+    cfg.insert_json5("mode", '"client"')
+    cfg.insert_json5("listen/endpoints", "[]")
+    cfg.insert_json5(
+        "connect/endpoints",
+        '["tcp/zenohd:7447"]'
+    )
+    session = zenoh.open(cfg)
+
     # callback loop
     start_flag = False
     os.makedirs(path, exist_ok=True)
-    while True:
-        if has_new_file(path):
-            print("New file added!")
-            # Create snapshot
-            ti = create_snapshot(path)
-            infohash = ti.info_hash()
-            mutable_item['infohash'] = infohash.to_bytes()
-            mutable_item['seq']+=1
-            print(f"New mutable item: \n{mutable_to_string(mutable_item)}")
-            h = ses.add_torrent({
-                "ti" : ti,
-                "save_path" : os.path.dirname(path)
-            })
-            payload = msgpack.packb(mutable_item, use_bin_type=True)
-            start_flag = True
-        
-        if start_flag:
-            with zenoh.open(zenoh.Config()) as session:
+    try: 
+        while True:
+            if has_new_file(path):
+                print("New file added!")
+                # Create snapshot
+                ti = create_snapshot(path)
+                infohash = ti.info_hash()
+                mutable_item['infohash'] = infohash.to_bytes()
+                mutable_item['seq']+=1
+                print(f"New mutable item: \n{mutable_to_string(mutable_item)}")
+                h = ses.add_torrent({
+                    "ti" : ti,
+                    "save_path" : os.path.dirname(path)
+                })
+                payload = msgpack.packb(mutable_item, use_bin_type=True)
+                start_flag = True
                 session.put(f"mutable_items/{ROBOT_ID}", payload)
-                
-        if start_flag:
-            s = h.status()
-            print(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
-    
-        # alerts
-        # for a in ses.pop_alerts():
-        #     print(a)
-        time.sleep(5)
+                    
+            if start_flag:
+                s = h.status()
+                print(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
+        
+            # alerts
+            # for a in ses.pop_alerts():
+            #     print(a)
+            time.sleep(5)
+            
+    except KeyboardInterrupt:
+        print("\nExiting...")

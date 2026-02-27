@@ -8,7 +8,7 @@ import pdb
 from queue import Queue
 
 TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
-BAG = "woody_convoy"
+POSEGRAPH = "woody_convoy"
 PATH = f"{TORRENT_WS}/deconstructed/1/"
 STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
 
@@ -34,8 +34,21 @@ def on_sample(sample):
     print('Received Zenoh message')
     message_queue.put(sample)
 
-z = zenoh.open(zenoh.Config())
-sub = z.declare_subscriber("mutable_items/**", on_sample)
+# cfg = zenoh.Config.from_file("hunter2_zenoh.json5")
+cfg = zenoh.Config()
+# cfg.insert_json5("listen/endpoints", "[]")
+# cfg.insert_json5("mode", '"client"')
+
+cfg = zenoh.Config()
+cfg.insert_json5("mode", '"client"')
+cfg.insert_json5("listen/endpoints", "[]")
+cfg.insert_json5(
+    "connect/endpoints",
+    '["tcp/zenohd:7447"]'
+)
+session = zenoh.open(cfg)
+
+sub = session.declare_subscriber("mutable_items/**", on_sample)
 
 def on_mutable_item(sample, mutable_item):
     # Decode payload, update mutable_item
@@ -79,7 +92,6 @@ if __name__ == "__main__":
         if key != ROBOT_ID:
             peers.append((ROBOT_IPS[key], port))
 
-    pdb.set_trace
     print(f"peers: {peers}")
     old_infohash = mutable_item['infohash']
     # Process messages in main thread

@@ -1,5 +1,5 @@
 FROM ubuntu:22.04
-# docker run': docker run --rm -it --name torrent1   --privileged   --network=myNetwork   --ipc=host   -e DISPLAY=$DISPLAY   -v /tmp/.X11-unix:/tmp/.X11-unix   -v ${VTRROOT}:${VTRROOT}:rw   -v /dev:/dev   libtorrent
+# docker run: docker run --rm -it --name torrent1   --privileged   --network=myNetwork   --ipc=host   -e DISPLAY=$DISPLAY   -v /tmp/.X11-unix:/tmp/.X11-unix   -v ${VTRROOT}:${VTRROOT}:rw   -v /dev:/dev   libtorrent
 
 # 1. Install system dependencies
 ENV DEBIAN_FRONTEND=noninteractive
@@ -46,10 +46,9 @@ RUN cp ~/libtorrent/build/bindings/python/libtorrent*.so /usr/local/lib/python3.
 #  Install Zenoh router (zenohd)
 RUN echo "deb [trusted=yes] https://download.eclipse.org/zenoh/debian-repo/ /" | tee -a /etc/apt/sources.list > /dev/null && \
     apt-get update && \
-    apt-get install -y zenoh \
-    apt-get install -y zenoh-cli
+    apt-get install -y zenoh
 
-RUN pip3 install pynacl eclipse-zenoh msgpack
+RUN pip3 install pynacl eclipse-zenoh msgpack zenoh-cli
 
 ARG GROUPID=0
 ARG USERID=0

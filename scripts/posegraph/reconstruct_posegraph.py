@@ -9,15 +9,15 @@ import argparse
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
-folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
-
 parser = argparse.ArgumentParser(prog = 'Plot Point Clouds Path',
                         description = 'Plots point clouds')
 parser.add_argument('-b', '--bag_name', default='none', help="The posegraph name")      # option that takes a value
 args = parser.parse_args()
 bag_name = args.bag_name
 
-chunk_name =  'deconstructed/0/' + bag_name
+# folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
+folder_path = '/home/asrl/ASRL/vtr3/'
+chunk_name =  'torrent_ws/deconstructed/0/' + bag_name
 chunks_path = f'{folder_path}/{chunk_name}'
 
 """
@@ -231,7 +231,8 @@ if __name__ == '__main__':
         print(all_data['vertices'].head())
         print(all_data['edges'].head())
 
-        output_dir = 'reconstructed/0/' + bag_name + '/' + bag_name + '_' + str(i) 
+        # output_dir = f'{folder_path}/reconstructed/0/f{bag_name}/f{bag_name}_{str(i)}' 
+        output_dir = f'{folder_path}/temp/r{bag_name}/r{bag_name}' 
         print(f'reconstructing segment {i}')
         os.makedirs(output_dir, exist_ok=True)
         
