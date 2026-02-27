@@ -16,7 +16,14 @@ params = {
     'router'   : 'zenohd'
 }
 
-TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
+if params['device'] == 'docker':
+    TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
+elif params['device'] == 'hunter':
+    TORRENT_WS = "/home/indro/ASRL/vtr3/torrent_ws"
+else:
+    print('bad params')
+
+
 PATH = f"{TORRENT_WS}/deconstructed/0/{params['posegraph']}"
 STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
 
@@ -129,6 +136,8 @@ if __name__ == "__main__":
             "connect/endpoints",
             tcp
         )
+    elif params['device'] == 'hunter':
+        cfg = zenoh.Config.from_file(f"{TORRENT_WS}/../hunter/hunter2_zenoh.json5")    
 
     cfg.insert_json5("mode", '"client"')
     cfg.insert_json5("listen/endpoints", "[]")
