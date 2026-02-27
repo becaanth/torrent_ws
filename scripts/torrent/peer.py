@@ -74,6 +74,7 @@ if __name__ == "__main__":
         'my_ip' : MY_IP
     }
 
+    start=time.time()
     # Create session
     ses = lt.session({
         "listen_interfaces": f"{MY_IP}:6881,[::]:6881",
@@ -82,6 +83,8 @@ if __name__ == "__main__":
             lt.alert.category_t.all_categories
         )
     })
+    print(f'initiating torrent session took {time.time() - start}')
+
 
     peers = []
     port = 6881
@@ -92,10 +95,7 @@ if __name__ == "__main__":
     old_infohash = mutable_item['infohash']
 
     # Configure Zenoh
-    # cfg = zenoh.Config.from_file("hunter2_zenoh.json5")
-    cfg = zenoh.Config()
-    # cfg.insert_json5("listen/endpoints", "[]")
-    # cfg.insert_json5("mode", '"client"')
+    start=time.time()
     if params['device'] == 'docker':
         cfg = zenoh.Config()
         tcp = '["tcp/'+ params['router'] + ':7447"]'
@@ -110,12 +110,14 @@ if __name__ == "__main__":
     cfg.insert_json5("listen/endpoints", "[]")
     session = zenoh.open(cfg)
     sub = session.declare_subscriber("mutable_items/**", on_sample)
+    print(f'initiating zenoh session took {time.time() - start}')
 
     print(f"my IP: {MY_IP}")
     print(f"listening on {ses.listen_port()}")
     print("params: ",  params)
 
     # Process messages in main thread
+    start=time.time()
     try:
         while True:
             # Check for new messages (non-blocking)
@@ -145,9 +147,14 @@ if __name__ == "__main__":
             for handle in ses.get_torrents():
                 s = handle.status()
                 print(f"[{handle.info_hash()}] Progress: {s.progress*100:.1f}%")
+                if s.progress == 0.0:
+                    transfer_start = time.time()
+                if s.progress == 1.0:
+                    print(f"completed torrent in {time.time() - transfer_start} s")
             
             time.sleep(1)
 
     except KeyboardInterrupt:
         print("\nExiting...")
+        print(f'time from callback until killed: {time.time() - start}')
         session.close()

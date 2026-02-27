@@ -117,6 +117,7 @@ if __name__ == "__main__":
         'my_ip' : MY_IP
     }
 
+    start=time.time()
     # initiate torrent session
     ses = lt.session({
         "listen_interfaces": f"{MY_IP}:6881,[::]:6881",
@@ -125,9 +126,9 @@ if __name__ == "__main__":
             lt.alert.category_t.all_categories
         ),
     })
+    print(f'initiating torrent session took {time.time() - start}')
 
-    # cfg = zenoh.Config.from_file("hunter2_zenoh.json5")
-
+    start=time.time()
     if params['device'] == 'docker':
         cfg = zenoh.Config()
         tcp = '["tcp/'+ params['router'] + ':7447"]'
@@ -141,18 +142,19 @@ if __name__ == "__main__":
     cfg.insert_json5("mode", '"client"')
     cfg.insert_json5("listen/endpoints", "[]")
     session = zenoh.open(cfg)
+    print(f'initiating zenoh session took {time.time() - start}')
 
     # print
     print(f"my IP: {MY_IP}")
     print(f"listening on {ses.listen_port()}")
     print("params: ",  params)
+    start = time.time()
 
     # callback loop
     start_flag = False
     os.makedirs(path, exist_ok=True)
     try: 
         while True:
-            start = time.time()
             if has_new_file(path):
                 start_flag = True
                 print("[deconstructed]: new file")
@@ -173,7 +175,10 @@ if __name__ == "__main__":
                 session.put(f"mutable_items/{params['robot_id']}", payload)            
                 s = h.status()
                 print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
-        
+                if s.progress == 0.0:
+                    transfer_start = time.time()
+                if s.progress == 1.0:
+                    print(f"completed torrent in {time.time() - transfer_start} s")
             # alerts
             # for a in ses.pop_alerts():
             #     print(a)
@@ -182,4 +187,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nExiting...")
         session.close()
-        print(f'time from first payload until killed: {time.time() - start}')
+        print(f'time from callback until killed: {time.time() - start}')
