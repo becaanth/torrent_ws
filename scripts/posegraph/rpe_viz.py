@@ -212,13 +212,19 @@ class Posegraph:
         current = root
         visited = {root}
 
+        T_curr = pylgmath.Transformation()
         while current in adjacency:
             next_id, xi = adjacency[current]
             if next_id in visited:
                 break
-            dx, dy = (float(xi[0]), float(xi[1])) if xi is not None and len(xi) >= 2 else (1.0, 0.0)
-            px, py = positions[current]
-            positions[next_id] = (px + dx, py + dy)
+
+            # dx, dy = (float(xi[0]), float(xi[1])) if xi is not None and len(xi) >= 2 else (1.0, 0.0)
+            T_edge = pylgmath.Transformation( # TODO: covariance?
+               xi_ab=xi.reshape(6,1)
+            )
+            T_curr = T_curr @ T_edge  # compose in world frame
+            r = T_curr.r_ab_inb()
+            positions[next_id] = (float(r[0])),float(r[1])
             visited.add(next_id)
             current = next_id
 
@@ -388,4 +394,3 @@ if __name__ == '__main__':
         plot_cols=args.cols,
     )
     monitor.run()
-    pdb.set_trace()
