@@ -6,6 +6,7 @@ import os
 import yaml
 import pdb
 import argparse
+import pylgmath
 
 import threading
 import time
@@ -222,6 +223,37 @@ class Posegraph:
             current = next_id
 
         return positions
+    
+
+    def save(self, path=None):
+        """
+        Pickle this Posegraph to disk.
+        Defaults to <chunks_path>/<bag_name>.pkl if no path given.
+        Returns the path written to.
+        """
+        import pickle
+        if path is None:
+            path = os.path.join(self.chunks_path, f"{self.bag_name}.pkl")
+        with open(path, "wb") as f:
+            pickle.dump(self, f)
+        print(f"[{self.bag_name}] saved to {path}")
+        return path
+
+    @staticmethod
+    def load(path):
+        """
+        Load a pickled Posegraph from disk.
+
+        Example usage in a notebook / debug session:
+            pg = Posegraph.load('my_bag.pkl')
+            print(pg.edge_list[:5])
+        """
+        import pickle
+        with open(path, "rb") as f:
+            pg = pickle.load(f)
+        print(f"[{pg.bag_name}] loaded from {path} "
+              f"({len(pg.vertex_list)}v  {len(pg.edge_list)}e)")
+        return pg
 
 
 class PosegraphMonitor:
@@ -356,3 +388,4 @@ if __name__ == '__main__':
         plot_cols=args.cols,
     )
     monitor.run()
+    pdb.set_trace()
