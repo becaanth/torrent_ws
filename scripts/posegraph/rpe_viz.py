@@ -140,7 +140,17 @@ class Posegraph:
             if full_path in self._parsed_chunks:
                 continue
 
+            # skip if sqlite is still writing
+            if os.path.exists(full_path + "-journal"):
+                print(f"[{self.bag_name}] skipping {fname} (write in progress)")
+                continue
+
             new_vertices, new_edges = parse_chunk(full_path)
+            # if both are empty the file likely wasn't ready — don't mark as parsed
+            if not new_vertices and not new_edges:
+                print(f"[{self.bag_name}] {fname} returned no data, will retry next poll")
+                continue
+
             self.vertex_list.extend(new_vertices)
             self.edge_list.extend(new_edges)
             self._parsed_chunks.add(full_path)
@@ -156,38 +166,20 @@ class Posegraph:
 
 
     def draw(self, ax: plt.Axes):
-        """Render this posegraph onto ax."""
-        ax.cla()
-        ax.set_title(
-            f"Agent {self.agent}  |  {self.bag_name}\n"
-            f"{len(self.vertex_list)} vertices   {len(self.edge_list)} edges",
-            fontsize=9,
-        )
-        ax.set_aspect("equal")
-        ax.grid(True, linewidth=0.4, alpha=0.5)
-
+        """Render this posegraph onto ax (shared — do not cla here)."""
         positions = self._estimate_positions()
-
         if not positions:
-            ax.text(0.5, 0.5, "waiting for chunks…",
-                    ha="center", va="center", transform=ax.transAxes, color="grey")
             return
 
         xs = [p[0] for p in positions.values()]
         ys = [p[1] for p in positions.values()]
 
-        for edge in self.edge_list:
-            if edge.from_id in positions and edge.to_id in positions:
-                x0, y0 = positions[edge.from_id]
-                x1, y1 = positions[edge.to_id]
-                ax.plot([x0, x1], [y0, y1], "-", color="#4a90d9", linewidth=0.8, alpha=0.7)
-
-        ax.scatter(xs, ys, s=12, color="#e05c5c", zorder=3, linewidths=0)
+        line, = ax.plot(xs, ys, "-", linewidth=0.8, alpha=0.7, label=self.bag_name)
+        color = line.get_color()  # reuse matplotlib-assigned color for scatter
+        ax.scatter(xs, ys, s=8, color=color, zorder=3, linewidths=0)
 
         first_id = min(positions.keys())
-        ax.scatter(*positions[first_id], s=60, marker="*",
-                   color="gold", zorder=4, label="start")
-        ax.legend(fontsize=7, loc="upper left")
+        ax.scatter(*positions[first_id], s=60, marker="*", color=color, zorder=4)
 
 
     def _estimate_positions(self) -> dict[int, tuple[float, float]]:
@@ -223,8 +215,8 @@ class Posegraph:
                xi_ab=xi.reshape(6,1)
             )
             T_curr = T_curr @ T_edge  # compose in world frame
-            r = T_curr.r_ab_inb()
-            positions[next_id] = (float(r[0])),float(r[1])
+            r = T_curr.r_ab_inb().flatten()
+            positions[next_id] = (r[0].item(), r[1].item())
             visited.add(next_id)
             current = next_id
 
@@ -271,7 +263,7 @@ class PosegraphMonitor:
         monitor = PosegraphMonitor(watch_root, agent=0)
         monitor.run()
     """
-    POLL_HZ = 1.0
+    POLL_HZ = 2.0
 
     def __init__(self, watch_root: str, agent: int = 0, plot_cols: int = 2):
         self.watch_root = watch_root
@@ -334,20 +326,12 @@ class PosegraphMonitor:
 
         return dirty
 
-    def _rebuild_figure(self):
-        """Create or recreate the subplot grid to fit the current graph count."""
-        n = max(len(self._graphs), 1)
-        cols = min(self.plot_cols, n)
-        rows = (n + cols - 1) // cols
 
+    def _rebuild_figure(self):
+        """Create a single shared axes for all posegraphs."""
         if self._fig is not None:
             plt.close(self._fig)
-
-        self._fig, axes_grid = plt.subplots(
-            rows, cols,
-            figsize=(6 * cols, 5 * rows),
-            squeeze=False,
-        )
+        self._fig, ax = plt.subplots(figsize=(12, 8))
         self._fig.suptitle(
             f"Live Posegraph Monitor  |  agent {self.agent}",
             fontsize=11, fontweight="bold",
@@ -356,20 +340,30 @@ class PosegraphMonitor:
             "key_release_event",
             lambda e: exit(0) if e.key == "escape" else None,
         )
-        self._axes = axes_grid.flatten()
-
-        # Hide any spare axes
-        for ax in self._axes[n:]:
-            ax.set_visible(False)
+        self._ax = ax
+        self._ax.set_aspect("equal")
+        self._ax.grid(True, linewidth=0.4, alpha=0.5)
 
     def _redraw(self):
-        """Rebuild figure if layout changed, then redraw every posegraph."""
-        n = len(self._graphs)
-        if self._fig is None or len(self._axes) < n:
+        """Clear the shared axes and redraw all posegraphs."""
+        if self._fig is None:
             self._rebuild_figure()
 
-        for idx, pg in enumerate(self._graphs.values()):
-            pg.draw(self._axes[idx])
+        self._ax.cla()
+        self._ax.set_aspect("equal")
+        self._ax.grid(True, linewidth=0.4, alpha=0.5)
+        self._ax.set_title(
+            f"{len(self._graphs)} posegraph(s)  |  agent {self.agent}",
+            fontsize=9,
+        )
+
+        if not self._graphs:
+            self._ax.text(0.5, 0.5, "waiting for bags…",
+                         ha="center", va="center", transform=self._ax.transAxes, color="grey")
+        else:
+            for pg in self._graphs.values():
+                pg.draw(self._ax)
+            self._ax.legend(fontsize=8, loc="upper left")
 
         self._fig.tight_layout()
         self._fig.canvas.draw_idle()
@@ -379,17 +373,18 @@ class PosegraphMonitor:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Live posegraph monitor")
-    parser.add_argument(
-        "--watch_root",
-        default="/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/0",
-        help="Parent directory containing one subdirectory per bag run",
-    )
+    # parser.add_argument(
+    #     "--watch_root",
+    #     default="/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/0",
+    #     help="Parent directory containing one subdirectory per bag run",
+    # )
     parser.add_argument("--agent", type=int, default=0)
     parser.add_argument("--cols", type=int, default=2)
     args = parser.parse_args()
+    watch_root = f"/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/{args.agent}"
 
     monitor = PosegraphMonitor(
-        watch_root=args.watch_root,
+        watch_root=watch_root,
         agent=args.agent,
         plot_cols=args.cols,
     )

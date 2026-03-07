@@ -17,7 +17,7 @@ args = parser.parse_args()
 bag_name = args.bag_name
 
 folder_path = '/home/asrl/ASRL/vtr3/temp'
-agent = f"{0}"
+agent = f"{2}"
 deconstructed_path = f'/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/{agent}/'
 bag_path = f'{folder_path}/{bag_name}/graph'
 
@@ -192,6 +192,6 @@ if __name__ == '__main__':
         # pad to piece_size
         PIECE_SIZE = 2 * 1024 * 1024 # 2 MiB - 4 byte SQL overhead
         pad_file_to_exact_size(db_path, PIECE_SIZE)
-        # time.sleep(1)
+        time.sleep(0.25)
 
     print(f'done deconstructing {bag_name}')
