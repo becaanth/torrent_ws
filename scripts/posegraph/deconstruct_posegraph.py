@@ -32,6 +32,10 @@ bag_path = f'{folder_path}/{bag_name}/graph'
     - env_info
 """
 
+def inspect_ros_data(frame):
+    msg = deserialize_message(frame.data, get_message(frame["topic_type"]))
+    return msg
+
 def get_db3_elements(bag_path, which_data):
     """
     Generic read .db3 files to replace bespoke functions
@@ -65,21 +69,23 @@ def get_db3_elements(bag_path, which_data):
             'df': teach_vertices_df, 
             'vertex_ids' : v_ids[v_ids < 1e6]
         }
-    
+        pdb.set_trace()
+
     elif which_data == 'edges':
-            to_ids, from_ids, e_ids = np.array(()), np.array(()), np.array(())
-            for i in range(len(full_df)):
-                msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-                if msg.mode.mode == 1: # taken in manual mode
-                    e_ids = np.append(e_ids, i)
-                    to_ids = np.append(to_ids, msg._to_id)
-                    from_ids = np.append(from_ids, msg._from_id)
-            teach_edges_df = full_df.loc[e_ids]
-            res = {
-                'df' : teach_edges_df, 
-                'to_ids' : to_ids, 
-                'from_ids': from_ids
-            }
+        to_ids, from_ids, e_ids = np.array(()), np.array(()), np.array(())
+        for i in range(len(full_df)):
+            msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
+            if msg.mode.mode == 1: # taken in manual mode
+                e_ids = np.append(e_ids, i)
+                to_ids = np.append(to_ids, msg._to_id)
+                from_ids = np.append(from_ids, msg._from_id)
+        teach_edges_df = full_df.loc[e_ids]
+        res = {
+            'df' : teach_edges_df, 
+            'to_ids' : to_ids, 
+            'from_ids': from_ids
+        }
+        pdb.set_trace()
     
     elif which_data == 'pointmap':
         s_ids = np.array(())

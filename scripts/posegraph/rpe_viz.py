@@ -379,13 +379,11 @@ if __name__ == '__main__':
     #     help="Parent directory containing one subdirectory per bag run",
     # )
     parser.add_argument("--agent", type=int, default=0)
-    parser.add_argument("--cols", type=int, default=2)
     args = parser.parse_args()
     watch_root = f"/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/{args.agent}"
 
     monitor = PosegraphMonitor(
         watch_root=watch_root,
         agent=args.agent,
-        plot_cols=args.cols,
     )
     monitor.run()

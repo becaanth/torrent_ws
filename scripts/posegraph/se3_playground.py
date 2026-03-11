@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import pylgmath
 
-pg_name = 'virtr_urban'
+pg_name = 'test_indoors'
 pg = Posegraph.load(f'/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/0/{pg_name}/{pg_name}.pkl')
 
 def compose_with_cov(
