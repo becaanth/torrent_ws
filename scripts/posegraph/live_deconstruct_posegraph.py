@@ -1,199 +1,385 @@
-import sqlite3
-import pandas as pd
-import numpy as np
-import os
-import argparse
-import argparse
-import time
-import pdb
+"""
+live_deconstruct_posegraph.py
 
+Mirrors the behaviour of deconstruct_posegraph.py but runs continuously,
+maintaining persistent read connections to the 7 source .db3 files and
+only reading rows that have arrived since the last poll.
+
+A new output chunk is written each time a new submap appears in the
+pointmap table. Each chunk contains:
+    - vtr_index      (read once at startup, same for all chunks)
+    - vertices       (rows whose vertex_id falls in this submap's id range)
+    - edges          (rows whose from_id falls in this submap's id range)
+    - env_info       (rows indexed to this submap)
+    - waypoint_name  (rows indexed to this submap)
+    - pointmap       (the single submap row)
+    - pointmap_ptr   (rows whose map_vid == submap vertex_id)
+
+Usage:
+    python live_deconstruct_posegraph.py -b <bag_name> [--agent 2] [--poll_hz 1]
+"""
+
+import argparse
+import os
+import sqlite3
+import time
+
+import numpy as np
+import pandas as pd
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-parser = argparse.ArgumentParser(prog = 'Plot Point Clouds Path',
-                        description = 'Plots point clouds')
-parser.add_argument('-b', '--bag_name', default='none', help="The filepath to the pose graph folder. (Usually /a/path/graph)")      # option that takes a value
-args = parser.parse_args()
-bag_name = args.bag_name
-
-folder_path = '/home/asrl/ASRL/vtr3/temp'
-agent = f"{0}"
-deconstructed_path = f'/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/{agent}/'
-bag_path = f'{folder_path}/{bag_name}/graph'
-
-"""
-    - index
-    - vertices
-    - edges
-    - pointmap
-    x pointmap_v0, copy pointmap on reconstruction
-    - pointmap_ptr
-    - waypoint_name
-    - env_info
-"""
-
-def get_db3_elements(bag_path, which_data):
-    """
-    Generic read .db3 files to replace bespoke functions
-    """
-    if which_data in ['vertices', 'edges', 'index']:
-        conn = sqlite3.connect(f'{bag_path}/{which_data}/{which_data}_0.db3')
-    else:
-        conn = sqlite3.connect(f'{bag_path}/data/{which_data}/{which_data}_0.db3')
-
-    # Merge messages with topic info
-    full_df = pd.read_sql_query("""
-    SELECT 
-        t.name AS topic_name,
-        t.type AS topic_type,
-        m.timestamp,
-        m.data
-    FROM messages AS m
-    JOIN topics AS t ON m.topic_id = t.id
-    ORDER BY m.timestamp;
-    """, conn)
-
-    if which_data == 'vertices':
-        # get teach vertices
-        v_ids = np.array(())
-        for i in range(len(full_df)):
-            msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-            v_ids = np.append(v_ids, msg.id)
-
-        teach_vertices_df = full_df[v_ids < 1e6]
-        res = {
-            'df': teach_vertices_df, 
-            'vertex_ids' : v_ids[v_ids < 1e6]
-        }
-    
-    elif which_data == 'edges':
-            to_ids, from_ids, e_ids = np.array(()), np.array(()), np.array(())
-            for i in range(len(full_df)):
-                msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-                if msg.mode.mode == 1: # taken in manual mode
-                    e_ids = np.append(e_ids, i)
-                    to_ids = np.append(to_ids, msg._to_id)
-                    from_ids = np.append(from_ids, msg._from_id)
-            teach_edges_df = full_df.loc[e_ids]
-            res = {
-                'df' : teach_edges_df, 
-                'to_ids' : to_ids, 
-                'from_ids': from_ids
-            }
-    
-    elif which_data == 'pointmap':
-        s_ids = np.array(())
-        for i in range(len(full_df)):
-            msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-            s_ids = np.append(s_ids, msg.vertex_id)
-        teach_submaps_df = full_df[s_ids < 1e6]
-        res = {
-            'df': teach_submaps_df, 
-            'submap_ids' : s_ids[s_ids < 1e6]
-        }
-
-    elif which_data == 'pointmap_ptr':
-        this_vids, map_vids = np.array(()), np.array(())
-        for i in range(len(full_df)):
-            msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-            this_vids = np.append(this_vids, msg.this_vid)
-            map_vids = np.append(map_vids, msg.map_vid)
-
-        submap_ptrs_df = full_df[(this_vids + map_vids) < 1e6]
-        res = {
-            'df' : submap_ptrs_df,
-            'map_ids' : map_vids[map_vids < 1e6]
-        }
-
-    elif which_data in ['index', 'env_info', 'waypoint_name']:
-        res = {
-            'df' : full_df
-        }
-    
-    else:
-        print('[deconstruct_posegraph]: invalid topic requested')
-
-    conn.close()
-    return res
+PIECE_SIZE = 2 * 1024 * 1024  # 2 MiB
 
 
-def pad_file_to_exact_size(path, target_size):
-    # IMPORTANT: stat AFTER sqlite connection is closed
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _read_full_df(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Join messages + topics into a flat DataFrame."""
+    return pd.read_sql_query(
+        """
+        SELECT t.name  AS topic_name,
+               t.type  AS topic_type,
+               m.rowid AS rowid,
+               m.timestamp,
+               m.data
+        FROM   messages AS m
+        JOIN   topics   AS t ON m.topic_id = t.id
+        ORDER  BY m.rowid
+        """,
+        conn,
+    )
+
+
+def _read_new_rows(conn: sqlite3.Connection, after_rowid: int) -> pd.DataFrame:
+    """Read only rows with rowid > after_rowid."""
+    return pd.read_sql_query(
+        f"""
+        SELECT t.name  AS topic_name,
+               t.type  AS topic_type,
+               m.rowid AS rowid,
+               m.timestamp,
+               m.data
+        FROM   messages AS m
+        JOIN   topics   AS t ON m.topic_id = t.id
+        WHERE  m.rowid > {after_rowid}
+        ORDER  BY m.rowid
+        """,
+        conn,
+    )
+
+
+def pad_file_to_exact_size(path: str, target_size: int):
+    """Pad a closed .db3 file to exactly target_size bytes with null bytes."""
     current_size = os.path.getsize(path)
-
     if current_size > target_size:
-        raise RuntimeError(
-            f"{path} too large: {current_size} > {target_size}"
-        )
-
+        raise RuntimeError(f"{path} too large: {current_size} > {target_size}")
     missing = target_size - current_size
     if missing == 0:
         return
-
     with open(path, "ab") as f:
         f.write(b"\x00" * missing)
+    assert os.path.getsize(path) == target_size, "padding failed"
 
-    # sanity check
-    final_size = os.path.getsize(path)
-    assert final_size == target_size, (
-        f"padding failed: {final_size} != {target_size}"
-    )
 
-if __name__ == '__main__':
-    while True:
-        # vertices = get_db3_elements(bag_path, 'vertices')
-        # edges = get_db3_elements(bag_path, 'edges')
-        # index = get_db3_elements(bag_path, 'index')
-        pointmap = get_db3_elements(bag_path, 'pointmap')
-        pointmap_ptr = get_db3_elements(bag_path, 'pointmap_ptr')
-        # env_info = get_db3_elements(bag_path, 'env_info')
-        # waypoint_name = get_db3_elements(bag_path, 'waypoint_name')
+def _deserialize_col(df: pd.DataFrame, col: str):
+    """Deserialize a single column of ROS messages, return list of msgs."""
+    return [
+        deserialize_message(row.data, get_message(row.topic_type))
+        for _, row in df.iterrows()
+    ]
 
-        output_dir = deconstructed_path + bag_name
+
+# ---------------------------------------------------------------------------
+# LiveDeconstructor
+# ---------------------------------------------------------------------------
+
+class LiveDeconstructor:
+    """
+    Maintains persistent read connections to the 7 source .db3 files of a
+    VTR3 posegraph and polls for new rows at a fixed rate.
+
+    Source layout (relative to bag_path):
+        vertices/vertices_0.db3
+        edges/edges_0.db3
+        index/index_0.db3
+        data/pointmap/pointmap_0.db3
+        data/pointmap_ptr/pointmap_ptr_0.db3
+        data/waypoint_name/waypoint_name_0.db3
+        data/env_info/env_info_0.db3
+    """
+
+    def __init__(self, bag_path: str, output_dir: str, poll_hz: float = 1.0):
+        self.bag_path   = bag_path
+        self.output_dir = output_dir
+        self.poll_hz    = poll_hz
+
         os.makedirs(output_dir, exist_ok=True)
-        print(f'Output Directory: {output_dir}')
-        time.sleep(5)
-        print(f"# submaps: {len(pointmap['submap_ids'])}")
-    # write to .db3 vertex chunks
-    # for i, sid in enumerate(pointmap['submap_ids']):
-    #     db_path = f'{output_dir}/{i}.db3'
-    #     # write a .db3 for each sid
-    #     sid = int(sid)
-    #     chunk_submap = pointmap['df'].loc[[i]] # keep as a df not a Series object
-    #     # map_ids are stored indexwise, find idxs where map_id = sid
-    #     idxs = np.where(pointmap_ptr['map_ids'] == sid)[0]
-    #     chunk_submap_ptrs = pointmap_ptr['df'].loc[idxs]
-    #     chunk_waypoints = waypoint_name['df'].loc[idxs]
-    #     chunk_env_info = env_info['df'].loc[idxs]
-        
-    #     # get vertices at these idxs
-    #     v_mask = np.isin(vertices['vertex_ids'], idxs)
-    #     valid_vtx = np.where(v_mask)[0]
-    #     # sort them in ascending order and track idxs
-    #     sort_vidx = np.argsort(vertices['vertex_ids'][v_mask])
-    #     chunk_vtxs = vertices['df'].loc[valid_vtx[sort_vidx]]
 
-    #     # get corresponding edges
-    #     e_mask = np.isin(edges['from_ids'], idxs)
-    #     valid_edges = np.where(e_mask)[0]
-    #     # sort them in ascending order and track idxs
-    #     sort_eidx = np.argsort(edges['from_ids'][e_mask])
-    #     chunk_edges = edges['df'].loc[valid_edges[sort_eidx]]
+        # --- source db3 relative paths ---------------------------------------
+        self._db_relpaths = {
+            'vertices'     : 'vertices/vertices_0.db3',
+            'edges'        : 'edges/edges_0.db3',
+            'index'        : 'index/index_0.db3',
+            'pointmap'     : 'data/pointmap/pointmap_0.db3',
+            'pointmap_ptr' : 'data/pointmap_ptr/pointmap_ptr_0.db3',
+            'waypoint_name': 'data/waypoint_name/waypoint_name_0.db3',
+            'env_info'     : 'data/env_info/env_info_0.db3',
+        }
 
-    #     # convert df to sql to write to chunkwise db3
-    #     conn = sqlite3.connect(db_path)
-    #     index['df'].to_sql('vtr_index', conn, if_exists='replace', index=False) # index is same for all chunks
-    #     chunk_vtxs.to_sql('vertices', conn, if_exists='replace', index=False)
-    #     chunk_edges.to_sql('edges', conn, if_exists='replace', index=False)
-    #     chunk_env_info.to_sql('env_info', conn, if_exists='replace', index=False)
-    #     chunk_waypoints.to_sql('waypoint_name', conn, if_exists='replace', index=False)
-    #     chunk_submap.to_sql('pointmap', conn, if_exists='replace', index=False)
-    #     chunk_submap_ptrs.to_sql('pointmap_ptr', conn, if_exists='replace', index=False)
-    #     conn.close()
+        # Open connections without immutable=1 so schema changes are visible.
+        # check_same_thread=False is safe here since we are single-threaded.
+        self._conns = {
+            k: sqlite3.connect(os.path.join(bag_path, v), check_same_thread=False)
+            for k, v in self._db_relpaths.items()
+        }
 
-    #     # pad to piece_size
-    #     PIECE_SIZE = 2 * 1024 * 1024 # 2 MiB - 4 byte SQL overhead
-    #     pad_file_to_exact_size(db_path, PIECE_SIZE)
-    #     # time.sleep(1)
+        # --- per-source row cursors (last rowid seen) ------------------------
+        self._last_rowid = {k: 0 for k in self._conns}
 
-    print(f'done deconstructing {bag_name}')
+        # --- accumulated state across polls ----------------------------------
+        # DataFrames of all rows seen so far for each source
+        self._df: dict[str, pd.DataFrame] = {k: pd.DataFrame() for k in self._conns}
+
+        # Decoded id arrays (mirrors deconstruct_posegraph.py)
+        self._vertex_ids   : np.ndarray = np.array(())
+        self._from_ids     : np.ndarray = np.array(())
+        self._to_ids       : np.ndarray = np.array(())
+        self._submap_ids   : np.ndarray = np.array(())   # vertex_id of each pointmap row
+        self._map_vids     : np.ndarray = np.array(())   # map_vid of each pointmap_ptr row
+
+        # Which submap indices have already been written as output chunks
+        self._written_chunks: set[int] = set()
+
+        # index df is static — read once
+        self._index_df: pd.DataFrame = _read_full_df(self._conns['index'])
+        self._last_rowid['index'] = int(self._index_df['rowid'].max()) if len(self._index_df) else 0
+        print(f"[LiveDeconstructor] index: {len(self._index_df)} rows")
+        print(f"[LiveDeconstructor] output: {output_dir}")
+
+    # ------------------------------------------------------------------
+    # Public
+    # ------------------------------------------------------------------
+
+    def run(self):
+        print(f"[LiveDeconstructor] polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
+        try:
+            while True:
+                self._poll()
+                time.sleep(1.0 / self.poll_hz)
+        except KeyboardInterrupt:
+            print("\n[LiveDeconstructor] stopped.")
+        finally:
+            self._close()
+
+    # ------------------------------------------------------------------
+    # Internal — polling
+    # ------------------------------------------------------------------
+
+    def _poll(self):
+        """Read new rows from all sources, then write any new chunks."""
+        self._ingest_new_rows('vertices',      self._parse_vertices)
+        self._ingest_new_rows('edges',         self._parse_edges)
+        self._ingest_new_rows('pointmap',      self._parse_pointmap)
+        self._ingest_new_rows('pointmap_ptr',  self._parse_pointmap_ptr)
+        self._ingest_new_rows('waypoint_name', None)
+        self._ingest_new_rows('env_info',      None)
+
+        self._write_new_chunks()
+
+    def _ingest_new_rows(self, key: str, parse_fn):
+        """
+        Read rows added since last poll, append to self._df[key],
+        and call parse_fn to update decoded id arrays.
+        Silently skips if the messages/topics table does not exist yet
+        (VTR3 creates it lazily when the first message is written).
+        """
+        try:
+            new_rows = _read_new_rows(self._conns[key], self._last_rowid[key])
+        except Exception as e:
+            # Schema not yet visible on this connection — reopen and retry next poll.
+            print(f"[LiveDeconstructor] {key}: reconnecting ({e})")
+            try:
+                self._conns[key].close()
+            except Exception:
+                pass
+            self._conns[key] = sqlite3.connect(
+                os.path.join(self.bag_path, self._db_relpaths[key]),
+                check_same_thread=False,
+            )
+            return
+        if new_rows.empty:
+            return
+
+        self._last_rowid[key] = int(new_rows['rowid'].max())
+
+        # Append to accumulated DataFrame
+        if self._df[key].empty:
+            self._df[key] = new_rows
+        else:
+            self._df[key] = pd.concat([self._df[key], new_rows], ignore_index=True)
+
+        if parse_fn is not None:
+            parse_fn(new_rows)
+
+        print(f"[LiveDeconstructor] {key}: +{len(new_rows)} rows "
+              f"(total {len(self._df[key])})")
+
+    # ------------------------------------------------------------------
+    # Internal — id array updaters (mirrors get_db3_elements decoding)
+    # ------------------------------------------------------------------
+
+    def _parse_vertices(self, new_rows: pd.DataFrame):
+        for _, row in new_rows.iterrows():
+            msg = deserialize_message(row.data, get_message(row.topic_type))
+            if msg.id < 1e6:  # teach vertices only
+                self._vertex_ids = np.append(self._vertex_ids, msg.id)
+
+    def _parse_edges(self, new_rows: pd.DataFrame):
+        for _, row in new_rows.iterrows():
+            msg = deserialize_message(row.data, get_message(row.topic_type))
+            if msg.mode.mode == 1:  # manual/teach mode only
+                self._from_ids = np.append(self._from_ids, msg.from_id)
+                self._to_ids   = np.append(self._to_ids,   msg.to_id)
+
+    def _parse_pointmap(self, new_rows: pd.DataFrame):
+        for _, row in new_rows.iterrows():
+            msg = deserialize_message(row.data, get_message(row.topic_type))
+            if msg.vertex_id < 1e6:
+                self._submap_ids = np.append(self._submap_ids, msg.vertex_id)
+
+    def _parse_pointmap_ptr(self, new_rows: pd.DataFrame):
+        for _, row in new_rows.iterrows():
+            msg = deserialize_message(row.data, get_message(row.topic_type))
+            if (msg.this_vid + msg.map_vid) < 1e6:
+                self._map_vids = np.append(self._map_vids, msg.map_vid)
+
+    # ------------------------------------------------------------------
+    # Internal — chunk writing
+    # ------------------------------------------------------------------
+
+    def _write_new_chunks(self):
+        """
+        For each submap not yet written, check if we have enough data
+        to write its chunk and write it if so.
+        """
+        print(f"[_write_new_chunks] submap_ids={self._submap_ids}  "
+              f"map_vids={self._map_vids}  "
+              f"vertex_ids={self._vertex_ids[:8]}...  "
+              f"from_ids={self._from_ids[:8]}...  "
+              f"written={self._written_chunks}  "
+              f"rows: vtx={len(self._df['vertices'])} "
+              f"edge={len(self._df['edges'])} "
+              f"pm={len(self._df['pointmap'])} "
+              f"ptr={len(self._df['pointmap_ptr'])} "
+              f"wp={len(self._df['waypoint_name'])} "
+              f"env={len(self._df['env_info'])}")
+
+        for i, sid in enumerate(self._submap_ids):
+            if i in self._written_chunks:
+                continue
+
+            sid = int(sid)
+            print(f"  [chunk {i}] sid={sid}")
+
+            # Rows in pointmap_ptr that belong to this submap
+            idxs = np.where(self._map_vids == sid)[0]
+            print(f"  [chunk {i}] pointmap_ptr idxs for sid={sid}: {idxs}")
+            if len(idxs) == 0:
+                print(f"  [chunk {i}] SKIP: no pointmap_ptr rows yet")
+                continue
+
+            # pointmap row — single row at position i in accumulated df
+            if i >= len(self._df['pointmap']):
+                print(f"  [chunk {i}] SKIP: pointmap row {i} not yet in df (len={len(self._df['pointmap'])})")
+                continue
+            chunk_submap = self._df['pointmap'].iloc[[i]]
+
+            # pointmap_ptr rows
+            chunk_submap_ptrs = self._df['pointmap_ptr'].iloc[idxs]
+
+            # waypoint_name and env_info rows at same indices
+            max_idx = int(max(idxs))
+            print(f"  [chunk {i}] max_idx={max_idx}  "
+                  f"waypoint_name rows={len(self._df['waypoint_name'])}  "
+                  f"env_info rows={len(self._df['env_info'])}")
+            if len(self._df['waypoint_name']) <= max_idx or                len(self._df['env_info'])      <= max_idx:
+                print(f"  [chunk {i}] SKIP: waypoint_name or env_info not yet arrived")
+                continue
+            chunk_waypoints = self._df['waypoint_name'].iloc[idxs]
+            chunk_env_info  = self._df['env_info'].iloc[idxs]
+
+            # vertices whose vertex_id falls in idxs
+            v_mask    = np.isin(self._vertex_ids, idxs)
+            valid_vtx = np.where(v_mask)[0]
+            print(f"  [chunk {i}] vertex_ids matching idxs={idxs}: {self._vertex_ids[v_mask]}")
+            if len(valid_vtx) == 0:
+                print(f"  [chunk {i}] SKIP: no matching vertices")
+                continue
+            sort_vidx  = np.argsort(self._vertex_ids[v_mask])
+            chunk_vtxs = self._df['vertices'].iloc[valid_vtx[sort_vidx]]
+
+            # edges whose from_id falls in idxs
+            e_mask      = np.isin(self._from_ids, idxs)
+            valid_edges = np.where(e_mask)[0]
+            print(f"  [chunk {i}] from_ids matching idxs={idxs}: {self._from_ids[e_mask]}")
+            sort_eidx   = np.argsort(self._from_ids[e_mask])
+            chunk_edges = self._df['edges'].iloc[valid_edges[sort_eidx]]
+            # edges can be empty for the last submap — allow it
+
+            # --- write chunk ------------------------------------------------
+            db_path = os.path.join(self.output_dir, f"{i}.db3")
+
+            # Drop the rowid column before writing — not part of original schema
+            def _drop_rowid(df: pd.DataFrame) -> pd.DataFrame:
+                return df.drop(columns=['rowid'], errors='ignore')
+
+            conn = sqlite3.connect(db_path)
+            _drop_rowid(self._index_df).to_sql('vtr_index',      conn, if_exists='replace', index=False)
+            _drop_rowid(chunk_vtxs).to_sql(    'vertices',       conn, if_exists='replace', index=False)
+            _drop_rowid(chunk_edges).to_sql(   'edges',          conn, if_exists='replace', index=False)
+            _drop_rowid(chunk_env_info).to_sql( 'env_info',      conn, if_exists='replace', index=False)
+            _drop_rowid(chunk_waypoints).to_sql('waypoint_name', conn, if_exists='replace', index=False)
+            _drop_rowid(chunk_submap).to_sql(   'pointmap',      conn, if_exists='replace', index=False)
+            _drop_rowid(chunk_submap_ptrs).to_sql('pointmap_ptr',conn, if_exists='replace', index=False)
+            conn.close()
+
+            pad_file_to_exact_size(db_path, PIECE_SIZE)
+            self._written_chunks.add(i)
+            print(f"[LiveDeconstructor] wrote chunk {i}.db3  (submap vertex_id={sid})")
+
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+
+    def _close(self):
+        for conn in self._conns.values():
+            conn.close()
+        print("[LiveDeconstructor] connections closed.")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Live posegraph deconstructor")
+    parser.add_argument('-b', '--bag_name', required=True,
+                        help="Bag name (subdirectory under folder_path)")
+    parser.add_argument('--agent', type=int, default=2)
+    parser.add_argument('--poll_hz', type=float, default=1.0)
+    parser.add_argument('--folder_path', default='/home/asrl/ASRL/vtr3/temp')
+    parser.add_argument('--output_root', default='/home/asrl/ASRL/vtr3/torrent_ws/deconstructed')
+    args = parser.parse_args()
+
+    bag_path   = os.path.join(args.folder_path, args.bag_name, 'graph')
+    output_dir = os.path.join(args.output_root, str(args.agent), args.bag_name)
+
+    dec = LiveDeconstructor(
+        bag_path=bag_path,
+        output_dir=output_dir,
+        poll_hz=args.poll_hz,
+    )
+    dec.run()

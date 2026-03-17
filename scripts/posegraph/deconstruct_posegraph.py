@@ -26,7 +26,7 @@ bag_path = f'{folder_path}/{bag_name}/graph'
     - vertices
     - edges
     - pointmap
-    x pointmap_v0, copy pointmap on reconstruction
+    - pointmap_v0, copy pointmap on reconstruction
     - pointmap_ptr
     - waypoint_name
     - env_info
@@ -69,7 +69,6 @@ def get_db3_elements(bag_path, which_data):
             'df': teach_vertices_df, 
             'vertex_ids' : v_ids[v_ids < 1e6]
         }
-        pdb.set_trace()
 
     elif which_data == 'edges':
         to_ids, from_ids, e_ids = np.array(()), np.array(()), np.array(())
@@ -85,7 +84,6 @@ def get_db3_elements(bag_path, which_data):
             'to_ids' : to_ids, 
             'from_ids': from_ids
         }
-        pdb.set_trace()
     
     elif which_data == 'pointmap':
         s_ids = np.array(())
@@ -157,6 +155,8 @@ if __name__ == '__main__':
     output_dir = deconstructed_path + bag_name
     os.makedirs(output_dir, exist_ok=True)
     print(f'Output Directory: {output_dir}')
+
+    pdb.set_trace()
 
     # write to .db3 vertex chunks
     for i, sid in enumerate(pointmap['submap_ids']):

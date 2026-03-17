@@ -17,7 +17,7 @@ bag_name = args.bag_name
 
 # folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
 folder_path = '/home/asrl/ASRL/vtr3/'
-chunk_name =  'torrent_ws/deconstructed/0/' + bag_name
+chunk_name =  'torrent_ws/deconstructed/2/' + bag_name
 chunks_path = f'{folder_path}/{chunk_name}'
 
 """
