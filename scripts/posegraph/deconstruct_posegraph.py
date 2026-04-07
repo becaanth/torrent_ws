@@ -16,6 +16,7 @@ parser.add_argument('-b', '--bag_name', default='none', help="The filepath to th
 args = parser.parse_args()
 bag_name = args.bag_name
 
+# folder_path = '/home/asrl/ASRL/vtr3/temp/nanook/posegraph'
 folder_path = '/home/asrl/ASRL/vtr3/temp'
 agent = f"{2}"
 deconstructed_path = f'/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/{agent}/'
@@ -156,8 +157,6 @@ if __name__ == '__main__':
     os.makedirs(output_dir, exist_ok=True)
     print(f'Output Directory: {output_dir}')
 
-    pdb.set_trace()
-
     # write to .db3 vertex chunks
     for i, sid in enumerate(pointmap['submap_ids']):
         db_path = f'{output_dir}/{i}.db3'
@@ -198,6 +197,6 @@ if __name__ == '__main__':
         # pad to piece_size
         PIECE_SIZE = 2 * 1024 * 1024 # 2 MiB - 4 byte SQL overhead
         pad_file_to_exact_size(db_path, PIECE_SIZE)
-        time.sleep(0.25)
+        time.sleep(0.1)
 
     print(f'done deconstructing {bag_name}')

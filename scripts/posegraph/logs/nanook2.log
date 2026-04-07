@@ -1,0 +1,7 @@
+Output Directory: /home/asrl/ASRL/vtr3/torrent_ws/deconstructed/2/nanook2
+Traceback (most recent call last):
+  File "/home/asrl/ASRL/vtr3/torrent_ws/scripts/posegraph/deconstruct_posegraph.py", line 199, in <module>
+    pad_file_to_exact_size(db_path, PIECE_SIZE)
+  File "/home/asrl/ASRL/vtr3/torrent_ws/scripts/posegraph/deconstruct_posegraph.py", line 130, in pad_file_to_exact_size
+    raise RuntimeError(
+RuntimeError: /home/asrl/ASRL/vtr3/torrent_ws/deconstructed/2/nanook2/176.db3 too large: 2125824 > 2097152

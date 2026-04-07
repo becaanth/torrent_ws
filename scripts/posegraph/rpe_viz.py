@@ -350,7 +350,9 @@ class PosegraphMonitor:
             self._rebuild_figure()
 
         self._ax.cla()
-        self._ax.set_aspect("equal")
+        # self._ax.set_aspect("equal")
+        self._ax.set_xlim([-200,80])
+        self._ax.set_ylim([-180,100])
         self._ax.grid(True, linewidth=0.4, alpha=0.5)
         self._ax.set_title(
             f"{len(self._graphs)} posegraph(s)  |  agent {self.agent}",
@@ -363,7 +365,7 @@ class PosegraphMonitor:
         else:
             for pg in self._graphs.values():
                 pg.draw(self._ax)
-            self._ax.legend(fontsize=8, loc="upper left")
+            self._ax.legend(fontsize=8, loc="upper left",markerscale=5)
 
         self._fig.tight_layout()
         self._fig.canvas.draw_idle()
@@ -378,7 +380,7 @@ if __name__ == '__main__':
     #     default="/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/0",
     #     help="Parent directory containing one subdirectory per bag run",
     # )
-    parser.add_argument("--agent", type=int, default=0)
+    parser.add_argument("--agent", type=int, default=2)
     args = parser.parse_args()
     watch_root = f"/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/{args.agent}"
 
