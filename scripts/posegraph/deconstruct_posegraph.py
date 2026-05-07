@@ -10,17 +10,17 @@ import pdb
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-parser = argparse.ArgumentParser(prog = 'Plot Point Clouds Path',
-                        description = 'Plots point clouds')
-parser.add_argument('-b', '--bag_name', default='none', help="The filepath to the pose graph folder. (Usually /a/path/graph)")      # option that takes a value
+parser = argparse.ArgumentParser(description = 'Script to deconstruct posegraphs submap-wise')
+parser.add_argument('-b', '--bag_name', default='none', help="The name of the posegraph") 
+parser.add_argument('-a', '--agent_num', type=int, default=0, help="")
 args = parser.parse_args()
 bag_name = args.bag_name
+agent = args.agent_num
 
 # folder_path = '/home/asrl/ASRL/vtr3/temp/nanook/posegraph'
 folder_path = '/home/asrl/ASRL/vtr3/temp'
-agent = f"{2}"
-deconstructed_path = f'/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/{agent}/'
 bag_path = f'{folder_path}/{bag_name}/graph'
+deconstructed_path = f'/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/{agent}/'
 
 """
     - index
@@ -154,12 +154,13 @@ if __name__ == '__main__':
     waypoint_name = get_db3_elements(bag_path, 'waypoint_name')
 
     output_dir = deconstructed_path + bag_name
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(f"{output_dir}/data", exist_ok=True)
+    os.makedirs(f"{output_dir}/topology", exist_ok=True)
     print(f'Output Directory: {output_dir}')
 
     # write to .db3 vertex chunks
     for i, sid in enumerate(pointmap['submap_ids']):
-        db_path = f'{output_dir}/{i}.db3'
+        data_db_path = f'{output_dir}/{str(i).zfill(4)}.db3'
         # write a .db3 for each sid
         sid = int(sid)
         chunk_submap = pointmap['df'].loc[[i]] # keep as a df not a Series object
@@ -183,8 +184,11 @@ if __name__ == '__main__':
         sort_eidx = np.argsort(edges['from_ids'][e_mask])
         chunk_edges = edges['df'].loc[valid_edges[sort_eidx]]
 
+        # WRITE TO .db3s
+        # ========================================================
+        # DATA
         # convert df to sql to write to chunkwise db3
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(data_db_path)
         index['df'].to_sql('vtr_index', conn, if_exists='replace', index=False) # index is same for all chunks
         chunk_vtxs.to_sql('vertices', conn, if_exists='replace', index=False)
         chunk_edges.to_sql('edges', conn, if_exists='replace', index=False)
@@ -196,7 +200,9 @@ if __name__ == '__main__':
 
         # pad to piece_size
         PIECE_SIZE = 2 * 1024 * 1024 # 2 MiB - 4 byte SQL overhead
-        pad_file_to_exact_size(db_path, PIECE_SIZE)
-        time.sleep(0.1)
+        pad_file_to_exact_size(data_db_path, PIECE_SIZE)
+
+        # time.sleep(0.1)
+
 
     print(f'done deconstructing {bag_name}')

@@ -9,15 +9,16 @@ import argparse
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
-parser = argparse.ArgumentParser(prog = 'Plot Point Clouds Path',
-                        description = 'Plots point clouds')
-parser.add_argument('-b', '--bag_name', default='none', help="The posegraph name")      # option that takes a value
+parser = argparse.ArgumentParser(description = 'Script to deconstruct posegraphs submap-wise')
+parser.add_argument('-b', '--bag_name', default='none', help="The name of the posegraph") 
+parser.add_argument('-a', '--agent_num', type=int, default=0, help="")
 args = parser.parse_args()
 bag_name = args.bag_name
+agent = args.agent_num
 
 # folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
-folder_path = '/home/asrl/ASRL/vtr3/'
-chunk_name =  'torrent_ws/deconstructed/2/' + bag_name
+folder_path = '/home/asrl/ASRL/vtr3'
+chunk_name =  f'torrent_ws/deconstructed/{agent}/' + bag_name
 chunks_path = f'{folder_path}/{chunk_name}'
 
 """
@@ -93,6 +94,8 @@ def write_rosbag(df, bag_path, topic_name, topic_type, segment_num, partial):
     if topic_name == 'index':
         df = df.loc[[0]] # we only need one message
     db_path = f'{bag_path}/{topic_name}_0.db3'
+    if os.path.exists(db_path):
+        os.remove(db_path)
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
 
@@ -205,12 +208,13 @@ if __name__ == '__main__':
     # Tables to recover
     tables = ['vtr_index','env_info','waypoint_name','vertices','edges','pointmap','pointmap_ptr']
 
-    # Loop over each chunk DB
+    # Accumulate data across all segments, applying edge trimming per segment boundary
+    master_data = {table: [] for table in tables}
+
     for i, segment in enumerate(segments):
-        # Dictionary to hold chunked tables
         chunked_data = {table: [] for table in tables}
-        for s in segment:    
-            db_file = str(s) + '.db3'
+        for s in segment:
+            db_file = str(s).zfill(4) + '.db3'
             conn = sqlite3.connect(os.path.join(chunks_path, db_file))
             for table in tables:
                 try:
@@ -220,24 +224,32 @@ if __name__ == '__main__':
                     print(f"Warning: Could not read table {table} from {db_file}: {e}")
             conn.close()
 
-        # Concatenate chunks and sort by timestamp where applicable
-        all_data = {}
         for table, dfs in chunked_data.items():
-            if dfs:  # make sure there is at least one chunk
-                concatenated = pd.concat(dfs, ignore_index=True)
-                all_data[table] = concatenated
+            if not dfs:
+                continue
+            seg_df = pd.concat(dfs, ignore_index=True)
+            if partial and table == 'edges':
+                if i == 0:
+                    seg_df = seg_df.iloc[:-1]
+                else:
+                    seg_df = seg_df.iloc[1:-1]
+            master_data[table].append(seg_df)
 
-        # Now all_data['vertices'], all_data['edges'], etc. contain fully concatenated tables
-        print(all_data['vertices'].head())
-        print(all_data['edges'].head())
+    # Concatenate all segments into one table per topic
+    all_data = {}
+    for table, dfs in master_data.items():
+        if dfs:
+            all_data[table] = pd.concat(dfs, ignore_index=True)
 
-        # output_dir = f'{folder_path}/reconstructed/0/f{bag_name}/f{bag_name}_{str(i)}' 
-        output_dir = f'{folder_path}/temp/r{bag_name}/r{bag_name}' 
-        print(f'reconstructing segment {i}')
-        os.makedirs(output_dir, exist_ok=True)
-        
-        for key in all_data.keys():
-            print(f'serializing: {key}')
-            write_rosbag_from_df(all_data[key], output_dir, i, partial)
+    print(all_data['vertices'].head())
+    print(all_data['edges'].head())
+
+    output_dir = f'{folder_path}/temp/r{bag_name}'
+    print(f'reconstructing to {output_dir}')
+    os.makedirs(output_dir, exist_ok=True)
+
+    for key in all_data.keys():
+        print(f'serializing: {key}')
+        write_rosbag_from_df(all_data[key], output_dir, 0, False)
 
     print('done writing')
