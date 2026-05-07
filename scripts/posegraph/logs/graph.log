@@ -1,6 +1,0 @@
-Traceback (most recent call last):
-  File "/home/asrl/ASRL/vtr3/torrent_ws/scripts/posegraph/deconstruct_posegraph.py", line 147, in <module>
-    vertices = get_db3_elements(bag_path, 'vertices')
-  File "/home/asrl/ASRL/vtr3/torrent_ws/scripts/posegraph/deconstruct_posegraph.py", line 44, in get_db3_elements
-    conn = sqlite3.connect(f'{bag_path}/{which_data}/{which_data}_0.db3')
-sqlite3.OperationalError: unable to open database file

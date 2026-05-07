@@ -59,55 +59,53 @@ def get_db3_elements(bag_path, which_data):
     """, conn)
 
     if which_data == 'vertices':
-        # get teach vertices
-        v_ids = np.array(())
+        v_ids = np.array((), dtype=np.uint64)
         for i in range(len(full_df)):
             msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-            v_ids = np.append(v_ids, msg.id)
+            v_ids = np.append(v_ids, np.uint64(msg.id))
 
-        teach_vertices_df = full_df[v_ids < 1e6]
         res = {
-            'df': teach_vertices_df, 
-            'vertex_ids' : v_ids[v_ids < 1e6]
+            'df': full_df,
+            'vertex_ids': v_ids
         }
 
     elif which_data == 'edges':
-        to_ids, from_ids, e_ids = np.array(()), np.array(()), np.array(())
+        to_ids = np.array((), dtype=np.uint64)
+        from_ids = np.array((), dtype=np.uint64)
+        e_ids = np.array((), dtype=np.uint64)
         for i in range(len(full_df)):
             msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
             if msg.mode.mode == 1: # taken in manual mode
-                e_ids = np.append(e_ids, i)
-                to_ids = np.append(to_ids, msg._to_id)
-                from_ids = np.append(from_ids, msg._from_id)
-        teach_edges_df = full_df.loc[e_ids]
+                e_ids = np.append(e_ids, np.uint64(i))
+                to_ids = np.append(to_ids, np.uint64(msg._to_id))
+                from_ids = np.append(from_ids, np.uint64(msg._from_id))
         res = {
-            'df' : teach_edges_df, 
-            'to_ids' : to_ids, 
+            'df': full_df.loc[e_ids],
+            'to_ids': to_ids,
             'from_ids': from_ids
         }
-    
+
     elif which_data == 'pointmap':
-        s_ids = np.array(())
+        s_ids = np.array((), dtype=np.uint64)
         for i in range(len(full_df)):
             msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-            s_ids = np.append(s_ids, msg.vertex_id)
-        teach_submaps_df = full_df[s_ids < 1e6]
+            s_ids = np.append(s_ids, np.uint64(msg.vertex_id))
         res = {
-            'df': teach_submaps_df, 
-            'submap_ids' : s_ids[s_ids < 1e6]
+            'df': full_df,
+            'submap_ids': s_ids
         }
 
     elif which_data == 'pointmap_ptr':
-        this_vids, map_vids = np.array(()), np.array(())
+        this_vids = np.array((), dtype=np.uint64)
+        map_vids = np.array((), dtype=np.uint64)
         for i in range(len(full_df)):
             msg = deserialize_message(full_df.loc[i].data, get_message(full_df.loc[i]["topic_type"]))
-            this_vids = np.append(this_vids, msg.this_vid)
-            map_vids = np.append(map_vids, msg.map_vid)
-
-        submap_ptrs_df = full_df[(this_vids + map_vids) < 1e6]
+            this_vids = np.append(this_vids, np.uint64(msg.this_vid))
+            map_vids = np.append(map_vids, np.uint64(msg.map_vid))
         res = {
-            'df' : submap_ptrs_df,
-            'map_ids' : map_vids[map_vids < 1e6]
+            'df': full_df,
+            'this_vids': this_vids,
+            'map_ids': map_vids
         }
 
     elif which_data in ['index', 'env_info', 'waypoint_name']:
@@ -154,33 +152,30 @@ if __name__ == '__main__':
     waypoint_name = get_db3_elements(bag_path, 'waypoint_name')
 
     output_dir = deconstructed_path + bag_name
-    os.makedirs(f"{output_dir}/data", exist_ok=True)
-    os.makedirs(f"{output_dir}/topology", exist_ok=True)
+    os.makedirs(f"{output_dir}", exist_ok=True)
     print(f'Output Directory: {output_dir}')
 
     # write to .db3 vertex chunks
     for i, sid in enumerate(pointmap['submap_ids']):
-        data_db_path = f'{output_dir}/{str(i).zfill(4)}.db3'
-        # write a .db3 for each sid
-        sid = int(sid)
-        chunk_submap = pointmap['df'].loc[[i]] # keep as a df not a Series object
-        # map_ids are stored indexwise, find idxs where map_id = sid
-        idxs = np.where(pointmap_ptr['map_ids'] == sid)[0]
-        chunk_submap_ptrs = pointmap_ptr['df'].loc[idxs]
-        chunk_waypoints = waypoint_name['df'].loc[idxs]
-        chunk_env_info = env_info['df'].loc[idxs]
-        
-        # get vertices at these idxs
-        v_mask = np.isin(vertices['vertex_ids'], idxs)
+        data_db_path = f'{output_dir}/{str(hex(int(sid)))[2:].zfill(16)}.db3'
+        chunk_submap = pointmap['df'].loc[[i]]
+
+        # find rows in pointmap_ptr belonging to this submap, get their vertex IDs
+        ptr_row_idxs = np.where(pointmap_ptr['map_ids'] == sid)[0]
+        relevant_vids = pointmap_ptr['this_vids'][ptr_row_idxs]
+        chunk_submap_ptrs = pointmap_ptr['df'].loc[ptr_row_idxs]
+        chunk_waypoints = waypoint_name['df'].loc[ptr_row_idxs]
+        chunk_env_info = env_info['df'].loc[ptr_row_idxs]
+
+        # get vertices whose ID is in relevant_vids
+        v_mask = np.isin(vertices['vertex_ids'], relevant_vids)
         valid_vtx = np.where(v_mask)[0]
-        # sort them in ascending order and track idxs
         sort_vidx = np.argsort(vertices['vertex_ids'][v_mask])
         chunk_vtxs = vertices['df'].loc[valid_vtx[sort_vidx]]
 
-        # get corresponding edges
-        e_mask = np.isin(edges['from_ids'], idxs)
+        # get edges whose from_id is in relevant_vids
+        e_mask = np.isin(edges['from_ids'], relevant_vids)
         valid_edges = np.where(e_mask)[0]
-        # sort them in ascending order and track idxs
         sort_eidx = np.argsort(edges['from_ids'][e_mask])
         chunk_edges = edges['df'].loc[valid_edges[sort_eidx]]
 
