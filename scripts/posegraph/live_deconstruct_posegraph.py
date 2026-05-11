@@ -277,19 +277,19 @@ class LiveDeconstructor:
         For each submap not yet written, check if we have enough data
         to write its chunk and write it if so.
         """
-        print(f"[_write_new_chunks] submap_ids={self._submap_ids}  "
-              f"map_vids={self._map_vids}  "
-              f"vertex_ids={self._vertex_ids[:8]}...  "
-              f"from_ids={self._from_ids[:8]}...  "
-              f"written={self._written_chunks}  "
-              f"rows: vtx={len(self._df['vertices'])} "
-              f"edge={len(self._df['edges'])} "
-              f"pm={len(self._df['pointmap'])} "
-              f"ptr={len(self._df['pointmap_ptr'])} "
-              f"wp={len(self._df['waypoint_name'])} "
-              f"env={len(self._df['env_info'])}")
+        # print(f"[_write_new_chunks] submap_ids={self._submap_ids}  "
+        #       f"map_vids={self._map_vids}  "
+        #       f"vertex_ids={self._vertex_ids[:8]}...  "
+        #       f"from_ids={self._from_ids[:8]}...  "
+        #       f"written={self._written_chunks}  "
+        #       f"rows: vtx={len(self._df['vertices'])} "
+        #       f"edge={len(self._df['edges'])} "
+        #       f"pm={len(self._df['pointmap'])} "
+        #       f"ptr={len(self._df['pointmap_ptr'])} "
+        #       f"wp={len(self._df['waypoint_name'])} "
+        #       f"env={len(self._df['env_info'])}")
 
-        for i, sid in enumerate(self._submap_ids):
+        for i, sid in enumerate(self._submap_ids[:-1]):
             if i in self._written_chunks:
                 continue
 
