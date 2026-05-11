@@ -129,39 +129,45 @@ class LiveDeconstructor:
             'env_info'     : 'data/env_info/env_info_0.db3',
         }
 
-        # Open connections without immutable=1 so schema changes are visible.
-        # check_same_thread=False is safe here since we are single-threaded.
-        self._conns = {
-            k: sqlite3.connect(os.path.join(bag_path, v), check_same_thread=False)
-            for k, v in self._db_relpaths.items()
-        }
+        # Connections opened lazily once each file's directory is created by VTR3
+        self._conns: dict[str, sqlite3.Connection | None] = {k: None for k in self._db_relpaths}
 
         # --- per-source row cursors (last rowid seen) ------------------------
-        self._last_rowid = {k: 0 for k in self._conns}
+        self._last_rowid = {k: 0 for k in self._db_relpaths}
 
         # --- accumulated state across polls ----------------------------------
-        # DataFrames of all rows seen so far for each source
-        self._df: dict[str, pd.DataFrame] = {k: pd.DataFrame() for k in self._conns}
+        self._df: dict[str, pd.DataFrame] = {k: pd.DataFrame() for k in self._db_relpaths}
 
         # Decoded id arrays (mirrors deconstruct_posegraph.py)
-        self._vertex_ids   : np.ndarray = np.array(())
-        self._from_ids     : np.ndarray = np.array(())
-        self._to_ids       : np.ndarray = np.array(())
-        self._submap_ids   : np.ndarray = np.array(())   # vertex_id of each pointmap row
-        self._map_vids     : np.ndarray = np.array(())   # map_vid of each pointmap_ptr row
+        self._vertex_ids   : np.ndarray = np.array((), dtype=np.uint64)
+        self._from_ids     : np.ndarray = np.array((), dtype=np.uint64)
+        self._to_ids       : np.ndarray = np.array((), dtype=np.uint64)
+        self._submap_ids   : np.ndarray = np.array((), dtype=np.uint64)
+        self._this_vids    : np.ndarray = np.array((), dtype=np.uint64)
+        self._map_vids     : np.ndarray = np.array((), dtype=np.uint64)
 
         # Which submap indices have already been written as output chunks
         self._written_chunks: set[int] = set()
 
-        # index df is static — read once
-        self._index_df: pd.DataFrame = _read_full_df(self._conns['index'])
-        self._last_rowid['index'] = int(self._index_df['rowid'].max()) if len(self._index_df) else 0
-        print(f"[LiveDeconstructor] index: {len(self._index_df)} rows")
+        # index df read lazily on first successful connection
+        self._index_df: pd.DataFrame | None = None
+
         print(f"[LiveDeconstructor] output: {output_dir}")
 
     # ------------------------------------------------------------------
     # Public
     # ------------------------------------------------------------------
+
+    def _get_conn(self, key: str) -> sqlite3.Connection | None:
+        """Return an open connection for key, opening it lazily if the file exists."""
+        if self._conns[key] is not None:
+            return self._conns[key]
+        full_path = os.path.join(self.bag_path, self._db_relpaths[key])
+        if not os.path.exists(full_path):
+            return None
+        self._conns[key] = sqlite3.connect(full_path, check_same_thread=False)
+        print(f"[LiveDeconstructor] opened {key}")
+        return self._conns[key]
 
     def run(self):
         print(f"[LiveDeconstructor] polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
@@ -180,6 +186,16 @@ class LiveDeconstructor:
 
     def _poll(self):
         """Read new rows from all sources, then write any new chunks."""
+        if self._index_df is None:
+            conn = self._get_conn('index')
+            if conn is not None:
+                try:
+                    self._index_df = _read_full_df(conn)
+                    self._last_rowid['index'] = int(self._index_df['rowid'].max()) if len(self._index_df) else 0
+                    print(f"[LiveDeconstructor] index: {len(self._index_df)} rows")
+                except Exception as e:
+                    print(f"[LiveDeconstructor] index: not ready yet ({e})")
+
         self._ingest_new_rows('vertices',      self._parse_vertices)
         self._ingest_new_rows('edges',         self._parse_edges)
         self._ingest_new_rows('pointmap',      self._parse_pointmap)
@@ -193,22 +209,20 @@ class LiveDeconstructor:
         """
         Read rows added since last poll, append to self._df[key],
         and call parse_fn to update decoded id arrays.
-        Silently skips if the messages/topics table does not exist yet
-        (VTR3 creates it lazily when the first message is written).
+        Silently skips if the file does not exist yet or the schema isn't ready.
         """
+        conn = self._get_conn(key)
+        if conn is None:
+            return
         try:
-            new_rows = _read_new_rows(self._conns[key], self._last_rowid[key])
+            new_rows = _read_new_rows(conn, self._last_rowid[key])
         except Exception as e:
-            # Schema not yet visible on this connection — reopen and retry next poll.
             print(f"[LiveDeconstructor] {key}: reconnecting ({e})")
             try:
                 self._conns[key].close()
             except Exception:
                 pass
-            self._conns[key] = sqlite3.connect(
-                os.path.join(self.bag_path, self._db_relpaths[key]),
-                check_same_thread=False,
-            )
+            self._conns[key] = None
             return
         if new_rows.empty:
             return
@@ -234,27 +248,25 @@ class LiveDeconstructor:
     def _parse_vertices(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
             msg = deserialize_message(row.data, get_message(row.topic_type))
-            if msg.id < 1e6:  # teach vertices only
-                self._vertex_ids = np.append(self._vertex_ids, msg.id)
+            self._vertex_ids = np.append(self._vertex_ids, np.uint64(msg.id))
 
     def _parse_edges(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
             msg = deserialize_message(row.data, get_message(row.topic_type))
             if msg.mode.mode == 1:  # manual/teach mode only
-                self._from_ids = np.append(self._from_ids, msg.from_id)
-                self._to_ids   = np.append(self._to_ids,   msg.to_id)
+                self._from_ids = np.append(self._from_ids, np.uint64(msg._from_id))
+                self._to_ids   = np.append(self._to_ids,   np.uint64(msg._to_id))
 
     def _parse_pointmap(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
             msg = deserialize_message(row.data, get_message(row.topic_type))
-            if msg.vertex_id < 1e6:
-                self._submap_ids = np.append(self._submap_ids, msg.vertex_id)
+            self._submap_ids = np.append(self._submap_ids, np.uint64(msg.vertex_id))
 
     def _parse_pointmap_ptr(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
             msg = deserialize_message(row.data, get_message(row.topic_type))
-            if (msg.this_vid + msg.map_vid) < 1e6:
-                self._map_vids = np.append(self._map_vids, msg.map_vid)
+            self._this_vids = np.append(self._this_vids, np.uint64(msg.this_vid))
+            self._map_vids  = np.append(self._map_vids,  np.uint64(msg.map_vid))
 
     # ------------------------------------------------------------------
     # Internal — chunk writing
@@ -285,11 +297,14 @@ class LiveDeconstructor:
             print(f"  [chunk {i}] sid={sid}")
 
             # Rows in pointmap_ptr that belong to this submap
-            idxs = np.where(self._map_vids == sid)[0]
-            print(f"  [chunk {i}] pointmap_ptr idxs for sid={sid}: {idxs}")
-            if len(idxs) == 0:
+            ptr_row_idxs = np.where(self._map_vids == sid)[0]
+            print(f"  [chunk {i}] pointmap_ptr rows for sid={sid}: {ptr_row_idxs}")
+            if len(ptr_row_idxs) == 0:
                 print(f"  [chunk {i}] SKIP: no pointmap_ptr rows yet")
                 continue
+
+            # actual vertex IDs belonging to this submap
+            relevant_vids = self._this_vids[ptr_row_idxs]
 
             # pointmap row — single row at position i in accumulated df
             if i >= len(self._df['pointmap']):
@@ -298,46 +313,47 @@ class LiveDeconstructor:
             chunk_submap = self._df['pointmap'].iloc[[i]]
 
             # pointmap_ptr rows
-            chunk_submap_ptrs = self._df['pointmap_ptr'].iloc[idxs]
+            chunk_submap_ptrs = self._df['pointmap_ptr'].iloc[ptr_row_idxs]
 
             # waypoint_name and env_info rows at same indices
-            max_idx = int(max(idxs))
+            max_idx = int(max(ptr_row_idxs))
             print(f"  [chunk {i}] max_idx={max_idx}  "
                   f"waypoint_name rows={len(self._df['waypoint_name'])}  "
                   f"env_info rows={len(self._df['env_info'])}")
-            if len(self._df['waypoint_name']) <= max_idx or                len(self._df['env_info'])      <= max_idx:
+            if len(self._df['waypoint_name']) <= max_idx or len(self._df['env_info']) <= max_idx:
                 print(f"  [chunk {i}] SKIP: waypoint_name or env_info not yet arrived")
                 continue
-            chunk_waypoints = self._df['waypoint_name'].iloc[idxs]
-            chunk_env_info  = self._df['env_info'].iloc[idxs]
+            chunk_waypoints = self._df['waypoint_name'].iloc[ptr_row_idxs]
+            chunk_env_info  = self._df['env_info'].iloc[ptr_row_idxs]
 
-            # vertices whose vertex_id falls in idxs
-            v_mask    = np.isin(self._vertex_ids, idxs)
+            # vertices whose vertex_id is in relevant_vids
+            v_mask    = np.isin(self._vertex_ids, relevant_vids)
             valid_vtx = np.where(v_mask)[0]
-            print(f"  [chunk {i}] vertex_ids matching idxs={idxs}: {self._vertex_ids[v_mask]}")
+            print(f"  [chunk {i}] vertex_ids matching relevant_vids={relevant_vids}: {self._vertex_ids[v_mask]}")
             if len(valid_vtx) == 0:
                 print(f"  [chunk {i}] SKIP: no matching vertices")
                 continue
             sort_vidx  = np.argsort(self._vertex_ids[v_mask])
             chunk_vtxs = self._df['vertices'].iloc[valid_vtx[sort_vidx]]
 
-            # edges whose from_id falls in idxs
-            e_mask      = np.isin(self._from_ids, idxs)
+            # edges whose from_id is in relevant_vids
+            e_mask      = np.isin(self._from_ids, relevant_vids)
             valid_edges = np.where(e_mask)[0]
-            print(f"  [chunk {i}] from_ids matching idxs={idxs}: {self._from_ids[e_mask]}")
+            print(f"  [chunk {i}] from_ids matching relevant_vids={relevant_vids}: {self._from_ids[e_mask]}")
             sort_eidx   = np.argsort(self._from_ids[e_mask])
             chunk_edges = self._df['edges'].iloc[valid_edges[sort_eidx]]
             # edges can be empty for the last submap — allow it
 
             # --- write chunk ------------------------------------------------
-            db_path = os.path.join(self.output_dir, f"{i}.db3")
+            db_path = os.path.join(self.output_dir, f"{str(hex(int(sid)))[2:].zfill(16)}.db3")
 
             # Drop the rowid column before writing — not part of original schema
             def _drop_rowid(df: pd.DataFrame) -> pd.DataFrame:
                 return df.drop(columns=['rowid'], errors='ignore')
 
             conn = sqlite3.connect(db_path)
-            _drop_rowid(self._index_df).to_sql('vtr_index',      conn, if_exists='replace', index=False)
+            if self._index_df is not None:
+                _drop_rowid(self._index_df).to_sql('vtr_index',  conn, if_exists='replace', index=False)
             _drop_rowid(chunk_vtxs).to_sql(    'vertices',       conn, if_exists='replace', index=False)
             _drop_rowid(chunk_edges).to_sql(   'edges',          conn, if_exists='replace', index=False)
             _drop_rowid(chunk_env_info).to_sql( 'env_info',      conn, if_exists='replace', index=False)
@@ -348,7 +364,7 @@ class LiveDeconstructor:
 
             pad_file_to_exact_size(db_path, PIECE_SIZE)
             self._written_chunks.add(i)
-            print(f"[LiveDeconstructor] wrote chunk {i}.db3  (submap vertex_id={sid})")
+            print(f"[LiveDeconstructor] wrote chunk {str(hex(int(sid)))[2:].zfill(16)}.db3  (submap vertex_id={sid})")
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -356,7 +372,8 @@ class LiveDeconstructor:
 
     def _close(self):
         for conn in self._conns.values():
-            conn.close()
+            if conn is not None:
+                conn.close()
         print("[LiveDeconstructor] connections closed.")
 
 
@@ -368,7 +385,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Live posegraph deconstructor")
     parser.add_argument('-b', '--bag_name', required=True,
                         help="Bag name (subdirectory under folder_path)")
-    parser.add_argument('--agent', type=int, default=2)
+    parser.add_argument('--agent', type=int, default=0)
     parser.add_argument('--poll_hz', type=float, default=1.0)
     parser.add_argument('--folder_path', default='/home/asrl/ASRL/vtr3/temp')
     parser.add_argument('--output_root', default='/home/asrl/ASRL/vtr3/torrent_ws/deconstructed')

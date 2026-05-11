@@ -179,61 +179,28 @@ def write_rosbag_from_df(df, output_dir, segment_num, partial):
 
 
 if __name__ == '__main__':
-    # Get and sort .db3 files numerically
+    # Get and sort .db3 files by hex vertex ID
     db_files = sorted(
         [f for f in os.listdir(chunks_path) if f.endswith('.db3')],
-        key=lambda x: int(x.split('.')[0])
+        key=lambda x: int(x.split('.')[0], 16)
     )
-    # Extract numeric parts
-    nums = [int(f.split('.')[0]) for f in db_files]
-    # Identify sequential segments
-    segments = []
-    segment = [nums[0]]
-    for i in range(1, len(nums)):
-        if nums[i] == nums[i - 1] + 1:
-            segment.append(nums[i])
-        else:
-            segments.append(segment)
-            segment = [nums[i]]
-    segments.append(segment)
-
-    if len(segments) > 1:
-        partial = True
-    else:
-        partial = False
-
-    # Display results
-    print(f"Total sequential segments: {len(segments)}\n")
-
+    if not db_files:
+        print("No .db3 files found — nothing to reconstruct.")
+        exit(0)
     # Tables to recover
     tables = ['vtr_index','env_info','waypoint_name','vertices','edges','pointmap','pointmap_ptr']
 
-    # Accumulate data across all segments, applying edge trimming per segment boundary
     master_data = {table: [] for table in tables}
 
-    for i, segment in enumerate(segments):
-        chunked_data = {table: [] for table in tables}
-        for s in segment:
-            db_file = str(s).zfill(4) + '.db3'
-            conn = sqlite3.connect(os.path.join(chunks_path, db_file))
-            for table in tables:
-                try:
-                    df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
-                    chunked_data[table].append(df)
-                except Exception as e:
-                    print(f"Warning: Could not read table {table} from {db_file}: {e}")
-            conn.close()
-
-        for table, dfs in chunked_data.items():
-            if not dfs:
-                continue
-            seg_df = pd.concat(dfs, ignore_index=True)
-            if partial and table == 'edges':
-                if i == 0:
-                    seg_df = seg_df.iloc[:-1]
-                else:
-                    seg_df = seg_df.iloc[1:-1]
-            master_data[table].append(seg_df)
+    for db_file in db_files:
+        conn = sqlite3.connect(os.path.join(chunks_path, db_file))
+        for table in tables:
+            try:
+                df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
+                master_data[table].append(df)
+            except Exception as e:
+                print(f"Warning: Could not read table {table} from {db_file}: {e}")
+        conn.close()
 
     # Concatenate all segments into one table per topic
     all_data = {}

@@ -117,70 +117,104 @@ class Posegraph:
     """
     Represents one agents deconstructed directory
     """
-    def __init__(self, bag_name: str, chunks_path: str, agent: int):
+    def __init__(self, bag_name: str, data_path: str, topology_path: str, agent: int):
         self.bag_name = bag_name
-        self.chunks_path = chunks_path
-        self.agent=  agent
+        self.data_path = data_path
+        self.topology_path = topology_path
+        self.agent = agent
 
         self.vertex_list: list[Vertex] = []
         self.edge_list: list[Edge] = []
+        self.data_edge_list: list[Edge] = []
 
-        self._parsed_chunks: set[str] = set()
+        self._parsed_data: set[str] = set()
+        self._parsed_topology: set[str] = set()
 
     def poll(self) -> bool:
-        """
-        Scan chunks_path for any .db3 not yet parsed
-        Returns True if any new chunks were ingested
-        """
         dirty = False
-        for fname in sorted(os.listdir(self.chunks_path)):
+
+        # --- Pass 1: topology (unchanged) ---
+        for fname in sorted(os.listdir(self.topology_path)):
             if not fname.endswith(".db3"):
                 continue
-            full_path = os.path.join(self.chunks_path, fname)
-            if full_path in self._parsed_chunks:
+            full_path = os.path.join(self.topology_path, fname)
+            if full_path in self._parsed_topology:
                 continue
-
-            # skip if sqlite is still writing
             if os.path.exists(full_path + "-journal"):
-                print(f"[{self.bag_name}] skipping {fname} (write in progress)")
                 continue
 
             new_vertices, new_edges = parse_chunk(full_path)
-            # if both are empty the file likely wasn't ready — don't mark as parsed
             if not new_vertices and not new_edges:
-                print(f"[{self.bag_name}] {fname} returned no data, will retry next poll")
                 continue
 
             self.vertex_list.extend(new_vertices)
             self.edge_list.extend(new_edges)
-            self._parsed_chunks.add(full_path)
+            self._parsed_topology.add(full_path)
             dirty = True
 
             print(
-                f"[{self.bag_name}] parsed {fname} "
-                f"(+{len(new_vertices)}v  +{len(new_edges)}e) "
-                f"| total: {len(self.vertex_list)}v  {len(self.edge_list)}e"
+                f"[{self.bag_name}] parsed topology {fname} "
+                f"(+{len(new_vertices)}v  +{len(new_edges)}e)"
             )
+
+        # --- Pass 2: data (retry every poll until found) ---
+        for fname in sorted(os.listdir(self.topology_path)):
+            if not fname.endswith(".db3"):
+                continue
+            topology_full_path = os.path.join(self.topology_path, fname)
+            if topology_full_path not in self._parsed_topology:
+                continue  # topology not ready yet, skip
+
+            data_full_path = os.path.join(self.data_path, fname)
+            if data_full_path in self._parsed_data:
+                continue  # already got this one
+
+            if not os.path.exists(data_full_path):
+                continue  # not written yet, will retry next poll
+
+            if os.path.exists(data_full_path + "-journal"):
+                continue  # still writing
+
+            _, new_edges = parse_chunk(data_full_path)
+            if not new_edges:
+                continue  # not ready, retry
+
+            self.data_edge_list.extend(new_edges)
+            self._parsed_data.add(data_full_path)
+            dirty = True
+
+            print(f"[{self.bag_name}] parsed data {fname} (+{len(new_edges)}e)")
 
         return dirty
 
-
     def draw(self, ax: plt.Axes):
-        """Render this posegraph onto ax (shared — do not cla here)."""
         positions = self._estimate_positions()
         if not positions:
             return
 
-        xs = [p[0] for p in positions.values()]
-        ys = [p[1] for p in positions.values()]
+        # Convert to numpy arrays for masking
+        keys = sorted(positions.keys())
+        data = np.array([positions[k] for k in keys]) # shape (N, 3)
+        xs, ys, received = data[:, 0], data[:, 1], data[:, 2]
 
-        line, = ax.plot(xs, ys, "-", linewidth=0.8, alpha=0.7, label=self.bag_name)
-        color = line.get_color()  # reuse matplotlib-assigned color for scatter
-        ax.scatter(xs, ys, s=8, color=color, zorder=3, linewidths=0)
+        # 1. Plot the "Base" line (The whole path in grey)
+        # ax.plot(xs, ys, "-", color="grey", linewidth=0.8, alpha=0.3)
 
-        first_id = min(positions.keys())
-        ax.scatter(*positions[first_id], s=60, marker="*", color=color, zorder=4)
+        # 2. Plot the "Received" line (Masking out the zeros)
+        # Mask is True where we want to HIDE data (where received == 0)
+        mask = (received == 0)
+        m_xs = np.ma.masked_where(mask, xs)
+        m_ys = np.ma.masked_where(mask, ys)
 
+        line, = ax.plot(m_xs, m_ys, "-", linewidth=1.2, label=self.bag_name)
+        color = line.get_color()
+
+        # 3. Scatter points (Colored if received, grey if not)
+        colors = [color if r else "grey" for r in received]
+        ax.scatter(xs, ys, s=8, color=colors, zorder=3, linewidths=0)
+
+        # 4. Start marker
+        ax.scatter(xs[0], ys[0], s=60, marker="*", color=color, zorder=4)
 
     def _estimate_positions(self) -> dict[int, tuple[float, float]]:
         """
@@ -195,12 +229,14 @@ class Posegraph:
         }
 
         to_ids = {e.to_id for e in self.edge_list}
+        data_to_ids = {e.to_id for e in self.data_edge_list}
+
         roots = [e.from_id for e in self.edge_list if e.from_id not in to_ids]
         if not roots:
             return {}
 
         root = min(roots)
-        positions: dict[int, tuple[float, float]] = {root: (0.0, 0.0)}
+        positions: dict[int, tuple[float, float]] = {root: (0.0, 0.0, 0)}
         current = root
         visited = {root}
 
@@ -210,13 +246,17 @@ class Posegraph:
             if next_id in visited:
                 break
 
+            data_received = 0
+            if next_id in data_to_ids:
+                data_received = 1
+                
             # dx, dy = (float(xi[0]), float(xi[1])) if xi is not None and len(xi) >= 2 else (1.0, 0.0)
             T_edge = pylgmath.Transformation( # TODO: covariance?
                xi_ab=xi.reshape(6,1)
             )
             T_curr = T_curr @ T_edge  # compose in world frame
             r = T_curr.r_ab_inb().flatten()
-            positions[next_id] = (r[0].item(), r[1].item())
+            positions[next_id] = (r[0].item(), r[1].item(), data_received)
             visited.add(next_id)
             current = next_id
 
@@ -263,7 +303,7 @@ class PosegraphMonitor:
         monitor = PosegraphMonitor(watch_root, agent=0)
         monitor.run()
     """
-    POLL_HZ = 2.0
+    POLL_HZ = 4.0
 
     def __init__(self, watch_root: str, agent: int = 0, plot_cols: int = 2):
         self.watch_root = watch_root
@@ -312,7 +352,9 @@ class PosegraphMonitor:
             if entry.is_dir() and entry.name not in self._graphs:
                 pg = Posegraph(
                     bag_name=entry.name,
-                    chunks_path=entry.path,
+                    # chunks_path=f"{entry.path}",
+                    data_path=f"{entry.path}/data",
+                    topology_path=f"{entry.path}/topology",
                     agent=self.agent,
                 )
                 self._graphs[entry.name] = pg
@@ -380,7 +422,7 @@ if __name__ == '__main__':
     #     default="/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/0",
     #     help="Parent directory containing one subdirectory per bag run",
     # )
-    parser.add_argument("--agent", type=int, default=2)
+    parser.add_argument("--agent", type=int, default=0)
     args = parser.parse_args()
     watch_root = f"/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/{args.agent}"
 

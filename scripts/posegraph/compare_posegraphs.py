@@ -1,88 +1,94 @@
-import sqlite3
-import pandas as pd
-import numpy as np
-import os
-import pdb
-import matplotlib.pyplot as plt
 import argparse
+import matplotlib.pyplot as plt
+import numpy as np
 
-from rclpy.serialization import deserialize_message
-from rosidl_runtime_py.utilities import get_message
 from deconstruct_posegraph import get_db3_elements
-from reconstruct_posegraph import inspect_ros_data
 
-parser = argparse.ArgumentParser(prog = 'Plot Point Clouds Path',
-                        description = 'Plots point clouds')
-parser.add_argument('-b', '--bag_name', default='none', help="The filepath to the pose graph folder. (Usually /a/path/graph)")      # option that takes a value
-args = parser.parse_args()
-bag_name = args.bag_name
+ORIGINAL_ROOT      = '/home/asrl/ASRL/vtr3/temp'
+RECONSTRUCTED_ROOT = '/home/asrl/ASRL/vtr3/temp'
 
-topics = ['vertices','edges','index','pointmap','pointmap_ptr','waypoint_name','env_info']
 
-posegraph_original, posegraph_reconstructed = {},{}
-original_dir = '/home/asrl/ASRL/vtr3/temp'
-reconstructed_dir = '/home/asrl/ASRL/vtr3/torrent_ws/reconstructed/0'
-original_path = f'{original_dir}/{bag_name}/graph'
-reconstructed_path = f'{reconstructed_dir}/{bag_name}/{bag_name}_0/graph'
+def compare_posegraphs(bag_name: str):
+    topics = ['vertices', 'edges', 'index', 'pointmap', 'pointmap_ptr', 'waypoint_name', 'env_info']
 
-for topic in topics:
-    posegraph_original[topic] = get_db3_elements(original_path, topic)
-    posegraph_reconstructed[topic] = get_db3_elements(reconstructed_path, topic)
+    orig  = {t: get_db3_elements(f'{ORIGINAL_ROOT}/{bag_name}/graph',       t) for t in topics}
+    recon = {t: get_db3_elements(f'{RECONSTRUCTED_ROOT}/r{bag_name}/graph', t) for t in topics}
 
-# check vertices
-num_vertices = len(posegraph_original['vertices']['df'])
-bool_vertex = []
-v_o, v_r = [], []
-for i in range(num_vertices):
-    target_vertex = i
-    for j in range(num_vertices):
-        if inspect_ros_data(posegraph_original['vertices']['df'].loc[j]).id ==target_vertex:
-            vertex_a = posegraph_original['vertices']['df'].loc[j]
-            break
-    # for j in range(num_vertices):
-    #     if inspect_ros_data(posegraph_reconstructed['vertices']['df'].loc[j]).id ==target_vertex:
-    #         vertex_b = posegraph_reconstructed['vertices']['df'].loc[j]
-    #         break
-    vertex_b = posegraph_reconstructed['vertices']['df'].loc[i]
-    
-    v_o.append(inspect_ros_data(posegraph_original['vertices']['df'].loc[i]).id)
-    v_r.append(inspect_ros_data(posegraph_reconstructed['vertices']['df'].loc[i]).id)
-    print('a: ', v_o[i], '| b: ', v_r[i])
-    bool_vertex.append(vertex_a.all() == vertex_b.all())
+    # ------------------------------------------------------------------ vertices
+    orig_vids  = orig['vertices']['vertex_ids']
+    recon_vids = recon['vertices']['vertex_ids']
 
-# check edges
-num_edges = len(posegraph_original['edges']['df'])
-bool_edge = []
-for i in range(num_edges):
-    target_edge = i
-    for j in range(num_edges):
-        if inspect_ros_data(posegraph_original['edges']['df'].loc[j]).from_id ==target_edge:
-            edge_a = posegraph_original['edges']['df'].loc[j]
-            break
-    # for j in range(num_edges):
-    #     if inspect_ros_data(posegraph_reconstructed['edges']['df'].loc[j]).from_id ==target_edge:
-    #         edge_b = posegraph_reconstructed['edges']['df'].loc[j]
-    #         break
-    edge_b = posegraph_reconstructed['edges']['df'].loc[i]
-    bool_edge.append(edge_a.all() == edge_b.all())
+    orig_vid_to_idx  = {int(v): i for i, v in enumerate(orig_vids)}
+    recon_vid_to_idx = {int(v): i for i, v in enumerate(recon_vids)}
 
-bool_index = posegraph_original['index']['df'].equals(posegraph_reconstructed['index']['df'])
-bool_waypoint_name = posegraph_original['waypoint_name']['df'].equals(posegraph_reconstructed['waypoint_name']['df'])
-bool_env_info = posegraph_original['env_info']['df'].equals(posegraph_reconstructed['env_info']['df'])
-bool_pointmap = posegraph_original['pointmap']['df'].equals(posegraph_reconstructed['pointmap']['df'])
-bool_pointmap_ptr = posegraph_original['pointmap_ptr']['df'].equals(posegraph_reconstructed['pointmap_ptr']['df'])
+    all_vids    = sorted(set(orig_vid_to_idx) | set(recon_vid_to_idx))
+    vertex_match = []
+    for vid in all_vids:
+        in_o = vid in orig_vid_to_idx
+        in_r = vid in recon_vid_to_idx
+        if in_o and in_r:
+            data_o = orig['vertices']['df'].iloc[orig_vid_to_idx[vid]]['data']
+            data_r = recon['vertices']['df'].iloc[recon_vid_to_idx[vid]]['data']
+            match  = data_o == data_r
+        else:
+            match = False
+        vertex_match.append(match)
+        if not match:
+            print(f'  vertex {vid:#018x}: orig={in_o} recon={in_r} match={match}')
 
-print('vertices: ', bool_vertex)
-print('edges:    ', bool_edge)
-print('index:    ', bool_index)
-print('env_info:    ', bool_env_info)
-print('waypoint_name:    ', bool_waypoint_name)
-print('pointmap:    ', bool_pointmap)
-print('pointmap_ptr:    ', bool_pointmap_ptr)
+    # -------------------------------------------------------------------- edges
+    orig_from  = orig['edges']['from_ids']
+    orig_to    = orig['edges']['to_ids']
+    recon_from = recon['edges']['from_ids']
+    recon_to   = recon['edges']['to_ids']
 
-plt.plot(range(len(v_o)), v_o, label='original')
-plt.plot(range(len(v_r)), v_r, label='reconstructed')
-plt.xlabel('index in .db3')
-plt.ylabel('vertex id')
-plt.legend()
-plt.show()
+    orig_edge_df  = orig['edges']['df'].reset_index(drop=True)
+    recon_edge_df = recon['edges']['df'].reset_index(drop=True)
+
+    orig_edge_map  = {(int(f), int(t)): i for i, (f, t) in enumerate(zip(orig_from,  orig_to))}
+    recon_edge_map = {(int(f), int(t)): i for i, (f, t) in enumerate(zip(recon_from, recon_to))}
+
+    all_edges  = sorted(set(orig_edge_map) | set(recon_edge_map))
+    edge_match = []
+    for eid in all_edges:
+        in_o = eid in orig_edge_map
+        in_r = eid in recon_edge_map
+        if in_o and in_r:
+            data_o = orig_edge_df.iloc[orig_edge_map[eid]]['data']
+            data_r = recon_edge_df.iloc[recon_edge_map[eid]]['data']
+            match  = data_o == data_r
+        else:
+            match = False
+        edge_match.append(match)
+        if not match:
+            print(f'  edge ({eid[0]:#018x} -> {eid[1]:#018x}): orig={in_o} recon={in_r} match={match}')
+
+    # --------------------------------------------------------------- blob tables
+    def blobs_equal(key):
+        return orig[key]['df']['data'].reset_index(drop=True).equals(
+               recon[key]['df']['data'].reset_index(drop=True))
+
+    blob_results = {k: blobs_equal(k) for k in ['index', 'env_info', 'waypoint_name', 'pointmap', 'pointmap_ptr']}
+
+    # ----------------------------------------------------------------------- summary
+    print(f'\nvertices:      {all(vertex_match)}  ({sum(vertex_match)}/{len(vertex_match)} match)')
+    print(f'edges:         {all(edge_match)}  ({sum(edge_match)}/{len(edge_match)} match)')
+    for k, v in blob_results.items():
+        print(f'{k:<18} {v}')
+
+    # ----------------------------------------------------------------------- plot
+    plt.figure()
+    plt.plot(orig_vids,  label='original',      marker='.', linestyle='none')
+    plt.plot(recon_vids, label='reconstructed', marker='.', linestyle='none')
+    plt.xlabel('index in .db3')
+    plt.ylabel('vertex id')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Compare original and reconstructed posegraphs')
+    parser.add_argument('-b', '--bag_name', required=True, help='Posegraph bag name')
+    args = parser.parse_args()
+    compare_posegraphs(args.bag_name)

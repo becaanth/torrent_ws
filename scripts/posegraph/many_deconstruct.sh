@@ -4,15 +4,15 @@
 # Add or remove paths inside the parentheses (space-separated)
 export VTRTEMP='/home/asrl/ASRL/vtr3/temp'
 BAGS=(
-    "nanook1"
+    # "nanook1"
     "nanook2"
     # "nanook3"
     "nanook4"
-    "nanook5"
-    "woody_convoy"
+    # "nanook5"
+    # "woody_convoy"
     # "virtr_urban"
     "test_indoors"
-    "newnicycle"
+    # "newnicycle"
 )
 
 # 2. Start the monitor script first
@@ -33,6 +33,7 @@ do
     
     # Run creation script in background
     python3 deconstruct_posegraph.py -b "$BAG" > "logs/${LOG_NAME}.log" 2>&1 &
+    python3 deconstruct_posegraph.py -b "$BAG" -t True > "logs/${LOG_NAME}.log" 2>&1 &
 done
 
 echo "-------------------------------------------------------"
