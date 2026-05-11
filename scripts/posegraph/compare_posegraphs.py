@@ -2,7 +2,7 @@ import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 
-from deconstruct_posegraph import get_db3_elements
+from posegraph_utils import *
 
 ORIGINAL_ROOT      = '/home/asrl/ASRL/vtr3/temp'
 RECONSTRUCTED_ROOT = '/home/asrl/ASRL/vtr3/temp'

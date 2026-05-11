@@ -29,6 +29,8 @@ import pandas as pd
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
+from posegraph_utils import *
+
 PIECE_SIZE = 2 * 1024 * 1024  # 2 MiB
 
 
@@ -69,19 +71,6 @@ def _read_new_rows(conn: sqlite3.Connection, after_rowid: int) -> pd.DataFrame:
         """,
         conn,
     )
-
-
-def pad_file_to_exact_size(path: str, target_size: int):
-    """Pad a closed .db3 file to exactly target_size bytes with null bytes."""
-    current_size = os.path.getsize(path)
-    if current_size > target_size:
-        raise RuntimeError(f"{path} too large: {current_size} > {target_size}")
-    missing = target_size - current_size
-    if missing == 0:
-        return
-    with open(path, "ab") as f:
-        f.write(b"\x00" * missing)
-    assert os.path.getsize(path) == target_size, "padding failed"
 
 
 def _deserialize_col(df: pd.DataFrame, col: str):
