@@ -39,7 +39,7 @@ else:
     print('bad params')
 
 
-PATH = f"{TORRENT_WS}/deconstructed/0/{params['posegraph']}"
+PATH = f"{TORRENT_WS}/deconstructed/2/{params['posegraph']}"
 STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
 
 
@@ -132,6 +132,7 @@ if __name__ == "__main__":
 
     start=time.time()
     if params['device'] == 'docker':
+        print(f'params set for docker')
         cfg = zenoh.Config()
         tcp = '["tcp/'+ params['router'] + ':7447"]'
         cfg.insert_json5(
@@ -139,6 +140,7 @@ if __name__ == "__main__":
             tcp
         )
     elif params['device'] == 'hunter':
+        print(f'params set for hunter')
         cfg = zenoh.Config.from_file(f"{TORRENT_WS}/../hunter/hunter2_zenoh.json5")    
 
     cfg.insert_json5("mode", '"client"')
