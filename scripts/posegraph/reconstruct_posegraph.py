@@ -23,7 +23,7 @@ if __name__ == '__main__':
     bag_name = args.bag_name
     agent = args.agent_num
 
-    # folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
+    # folder_path = '/hodb_fileme/asrl/ASRL/vtr3/torrent_ws'
     folder_path = '/home/asrl/ASRL/vtr3'
     chunk_name =  f'torrent_ws/deconstructed/{agent}/' + bag_name
     chunks_path = f'{folder_path}/{chunk_name}'
@@ -65,7 +65,10 @@ if __name__ == '__main__':
     os.makedirs(output_dir, exist_ok=True)
 
     for key in all_data.keys():
-        print(f'serializing: {key}')
+        # print(f'serializing: {key}')
+        # s = 'topic_type'
+        # n = 'topic_name'
+        # print(f'{all_data[key][n].iloc[0]} : {all_data[key][s].iloc[0]}')
         write_rosbag_from_df(all_data[key], output_dir, 0, False)
 
     print('done writing')

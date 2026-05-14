@@ -17,7 +17,7 @@ from posegraph_utils import *
     - vertices
     - edges
     - pointmap
-    - pointmap_v0, copy pointmap on reconstruction
+    - pointmap_v0
     - pointmap_ptr
     - waypoint_name
     - env_info

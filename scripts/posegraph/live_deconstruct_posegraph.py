@@ -372,8 +372,7 @@ class LiveDeconstructor:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Live posegraph deconstructor")
-    parser.add_argument('-b', '--bag_name', required=True,
-                        help="Bag name (subdirectory under folder_path)")
+    parser.add_argument('-b', '--bag_name', required=True,help="Bag name (subdirectory under folder_path)")
     parser.add_argument('--agent', type=int, default=0)
     parser.add_argument('--poll_hz', type=float, default=1.0)
     parser.add_argument('--folder_path', default='/home/asrl/ASRL/vtr3/temp')
