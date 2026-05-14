@@ -3,28 +3,20 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-import yaml
-import pdb
 import argparse
 import pylgmath
 
-import threading
-import time
 from dataclasses import dataclass, field
 from typing import Optional
 
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
+from posegraph_utils import *
 # # folder_path = '/home/asrl/ASRL/vtr3/torrent_ws'
 # folder_path = '/home/asrl/ASRL/vtr3'
 # chunk_name =  'torrent_ws/deconstructed/0/' + bag_name
 # chunks_path = f'{folder_path}/{chunk_name}'
-
-
-def inspect_ros_data(frame):
-    msg = deserialize_message(frame.data, get_message(frame["topic_type"]))
-    return msg
 
 @dataclass
 class Vertex:
@@ -40,31 +32,6 @@ class Edge:
     def __repr__(self):
         return f"Edge({self.from_id}) -> ({self.to_id})"
     
-
-# Helper functions
-def _deserialize_frame(row: pd.Series):
-    """Deserialize a single messages-table row into a ROS message."""
-    return deserialize_message(row["data"], get_message(row["topic_type"]))
-
-
-def _read_full_df(db_path: str) -> pd.DataFrame:
-    """Join messages + topics from a .db3 file into a flat DataFrame."""
-    conn = sqlite3.connect(db_path)
-    df = pd.read_sql_query(
-        """
-        SELECT t.name AS topic_name,
-               t.type AS topic_type,
-               m.timestamp,
-               m.data
-        FROM   messages AS m
-        JOIN   topics   AS t ON m.topic_id = t.id
-        ORDER  BY m.timestamp
-        """,
-        conn,
-    )
-    conn.close()
-    return df
-
 
 def parse_chunk(db_path: str) -> tuple[list[Vertex], list[Edge]]:
     """
@@ -111,7 +78,6 @@ def parse_chunk(db_path: str) -> tuple[list[Vertex], list[Edge]]:
 
     conn.close()
     return vertices, edges
-
 
 class Posegraph:
     """
