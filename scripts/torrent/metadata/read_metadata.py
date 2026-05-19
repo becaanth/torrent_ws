@@ -1,6 +1,28 @@
 import libtorrent as lt
 import pprint
+import numpy as np
+import msgpack
 
+from dataclasses import dataclass, field
+from typing import Optional
+
+from rclpy.serialization import deserialize_message, serialize_message
+from rosidl_runtime_py.utilities import get_message
+
+@dataclass
+class Vertex:
+    vertex_id: int
+
+@dataclass
+class Edge:
+    from_id: int
+    to_id: int
+    xi: Optional[np.ndarray] = None
+    cov: Optional[np.ndarray] = None
+
+    def __repr__(self):
+        return f"Edge({self.from_id}) -> ({self.to_id})"
+    
 def inspect_torrent(path):
     raw = lt.bdecode(open(path, "rb").read())
     info = raw[b"info"]
@@ -19,7 +41,10 @@ def inspect_torrent(path):
         }
         print(f"  {rel_path}  ({size} bytes)")
         if extras:
-            pprint.pprint(extras, indent=4)
+            vertices = msgpack.unpackb(file_entry[b"x-vertices"], raw=False)
+            edges    = msgpack.unpackb(file_entry[b"x-edges"],    raw=False)
+            pprint.pprint(vertices, indent=4)
+            pprint.pprint(edges, indent=8)
 
 if __name__ == '__main__':
     path = '/home/asrl/ASRL/vtr3/torrent_ws/scripts/torrent/metadata/metadata.torrent'

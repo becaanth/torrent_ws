@@ -6,13 +6,23 @@ import zenoh
 import os
 import json
 import msgpack
+import numpy as np
 import argparse
+
+import sqlite3
+import pandas as pd
+from rclpy.serialization import deserialize_message, serialize_message
+from rosidl_runtime_py.utilities import get_message
+
+from dataclasses import dataclass, field
+from typing import Optional
+
 import pdb
 
 try:
     if os.path.exists('scripts/torrent/seeder_params.json'):
         with open('scripts/torrent/seeder_params.json', "r") as f:
-            params =  json.load(f)
+            params = json.load(f)
 except:
     print("can't open params, navigate to torrent_ws")
 
@@ -43,6 +53,20 @@ TORRENT_PATH = f"{TORRENT_WS}/deconstructed/0/{params['posegraph']}"
 METADATA_PATH = f"{TORRENT_WS}/scripts/torrent/metadata"
 STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
 
+@dataclass
+class Vertex:
+    vertex_id: int
+
+@dataclass
+class Edge:
+    from_id: int
+    to_id: int
+    xi: Optional[np.ndarray] = None
+    cov: Optional[np.ndarray] = None
+
+    def __repr__(self):
+        return f"Edge({self.from_id}) -> ({self.to_id})"
+    
 
 # -------------------------
 # Persistence
@@ -56,6 +80,64 @@ def load_state():
 def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f)
+
+
+def parse_chunk(db_path: str) -> tuple[list[Vertex], list[Edge]]:
+    """
+    Parse a single deconstructed .db3 chunk.
+    Returns (vertices, edges) extracted from that chunk.
+    """
+    conn = sqlite3.connect(db_path)
+
+    vertices: list[Vertex] = []
+    edges: list[Edge] = []
+
+    # --- vertices -----------------------------------------------------------
+    try:
+        vtx_df = pd.read_sql_query(
+            "SELECT topic_name, topic_type, timestamp, data FROM vertices", conn
+        )
+        for _, row in vtx_df.iterrows():
+            try:
+                msg = deserialize_message(row["data"], get_message(row["topic_type"]))
+                vertices.append(Vertex(vertex_id=int(msg.id)))
+            except Exception as exc:
+                print(f"[parse_chunk] vertex deserialize error in {db_path}: {exc}")
+    except Exception as exc:
+        print(f"[parse_chunk] no vertices table in {db_path}: {exc}")
+
+    # --- edges --------------------------------------------------------------
+    try:
+        edge_df = pd.read_sql_query(
+            "SELECT topic_name, topic_type, timestamp, data FROM edges", conn
+        )
+        for _, row in edge_df.iterrows():
+            try:
+                msg = deserialize_message(row["data"], get_message(row["topic_type"]))
+                # Only teach-mode edges (mode == 1)
+                if msg.mode.mode != 1:
+                    continue
+                xi = np.array(msg.t_to_from.xi)
+                cov = np.array(msg.t_to_from.cov).reshape(6, 6)
+                edges.append(Edge(from_id=int(msg.from_id), to_id=int(msg.to_id), xi=xi, cov=cov))
+            except Exception as exc:
+                print(f"[parse_chunk] edge deserialize error in {db_path}: {exc}")
+    except Exception as exc:
+        print(f"[parse_chunk] no edges table in {db_path}: {exc}")
+
+    conn.close()
+    return vertices, edges
+
+def vertex_to_dict(v: Vertex) -> dict:
+    return {"id": v.vertex_id}
+
+def edge_to_dict(e: Edge) -> dict:
+    return {
+        "from": e.from_id,
+        "to":   e.to_id,
+        "xi":   e.xi.tolist()  if e.xi  is not None else None,
+        "cov":  e.cov.tolist() if e.cov is not None else None,
+    }
 
 # -------------------------
 # Immutable snapshot
@@ -75,14 +157,24 @@ def create_snapshot(input_path, output_path):
     lt.set_piece_hashes(t, os.path.dirname(input_path))
 
     torrent_dict = t.generate()
-    ti = lt.torrent_info(torrent_dict)
 
     # annotate each entry in the dictionary
     for i, file_entry in enumerate(torrent_dict[b"info"][b"files"]):
+        # if b"attr" in file_entry and b"p" in file_entry[b"attr"]: # skip padding files
+        #     continue
         filename = file_entry[b"path"][-1].decode()
-        file_entry[b"x-annotation"] = filename[:4].encode()        
+        print(f"{input_path}/{filename}")
+        vertices, edges = parse_chunk(f"{input_path}/{filename}")
+        file_entry[b"x-vertices"] = msgpack.packb(
+            [vertex_to_dict(v) for v in vertices], use_bin_type=True
+        )
+        file_entry[b"x-edges"] = msgpack.packb(
+            [edge_to_dict(e) for e in edges], use_bin_type=True
+        )
 
     out_file = os.path.join(output_path, "metadata.torrent")
+    ti = lt.torrent_info(torrent_dict)
+
     with open(out_file, "wb") as f:
         f.write(lt.bencode(torrent_dict))
 
