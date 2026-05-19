@@ -39,7 +39,8 @@ else:
     print('bad params')
 
 
-PATH = f"{TORRENT_WS}/deconstructed/2/{params['posegraph']}"
+TORRENT_PATH = f"{TORRENT_WS}/deconstructed/0/{params['posegraph']}"
+METADATA_PATH = f"{TORRENT_WS}/scripts/torrent/metadata"
 STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
 
 
@@ -59,21 +60,27 @@ def save_state(state):
 # -------------------------
 # Immutable snapshot
 # -------------------------
-def create_snapshot(path):
+def create_snapshot(input_path, output_path):
     """
     Generate new .torrent for a directory
     """
     fs = lt.file_storage()
-    lt.add_files(fs, path)
+    lt.add_files(fs, input_path)
 
     t = lt.create_torrent(fs)
     
     PIECE_SIZE = 2 * 1024 * 1024 # padding
     t.piece_size(PIECE_SIZE)
 
-    lt.set_piece_hashes(t, os.path.dirname(path))
+    lt.set_piece_hashes(t, os.path.dirname(input_path))
 
-    ti = lt.torrent_info(t.generate())
+    torrent_dict = t.generate()
+    ti = lt.torrent_info(torrent_dict)
+
+    out_file = os.path.join(output_path, "metadata.torrent")
+    with open(out_file, "wb") as f:
+        f.write(lt.bencode(torrent_dict))
+
     return ti
 
 def drain_alerts(ses, timeout=10):
@@ -106,7 +113,9 @@ def mutable_to_string(mutable_item):
 
 if __name__ == "__main__":
 
-    path = PATH #input("Directory to seed: ").strip()
+    input_path = TORRENT_PATH #input("Directory to seed: ").strip()
+    output_path = METADATA_PATH
+
     salt = "submaps" #input("Salt (dataset id): ").strip()
     state = load_state()
     sk = SigningKey(bytes.fromhex(state["sk"]))
@@ -141,7 +150,7 @@ if __name__ == "__main__":
         )
     elif params['device'] == 'hunter':
         print(f'params set for hunter')
-        cfg = zenoh.Config.from_file(f"{TORRENT_WS}/../hunter/hunter2_zenoh.json5")    
+        cfg = zenoh.Config.from_file(f"{TORRENT_WS}/../warthog/hunter2_zenoh.json5")    
 
     cfg.insert_json5("mode", '"client"')
     cfg.insert_json5("listen/endpoints", "[]")
@@ -156,21 +165,22 @@ if __name__ == "__main__":
 
     # callback loop
     start_flag = False
-    os.makedirs(path, exist_ok=True)
+    os.makedirs(input_path, exist_ok=True)
+    os.makedirs(output_path, exist_ok=True)
     try: 
         while True:
-            if has_new_file(path):
+            if has_new_file(input_path) or start_flag == False:
                 start_flag = True
                 print("[deconstructed]: new file")
                 # Create snapshot
-                ti = create_snapshot(path)
+                ti = create_snapshot(input_path, output_path)
                 infohash = ti.info_hash()
                 mutable_item['infohash'] = infohash.to_bytes()
                 mutable_item['seq']+=1
                 print(f"[torrent] adding mutable item: {mutable_item['infohash']}") #\n{mutable_to_string(mutable_item)}")
                 h = ses.add_torrent({
                     "ti" : ti,
-                    "save_path" : os.path.dirname(path)
+                    "save_path" : os.path.dirname(input_path)
                 })
                 payload = msgpack.packb(mutable_item, use_bin_type=True)
                     
