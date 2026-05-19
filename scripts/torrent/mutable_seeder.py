@@ -77,6 +77,11 @@ def create_snapshot(input_path, output_path):
     torrent_dict = t.generate()
     ti = lt.torrent_info(torrent_dict)
 
+    # annotate each entry in the dictionary
+    for i, file_entry in enumerate(torrent_dict[b"info"][b"files"]):
+        filename = file_entry[b"path"][-1].decode()
+        file_entry[b"x-annotation"] = filename[:4].encode()        
+
     out_file = os.path.join(output_path, "metadata.torrent")
     with open(out_file, "wb") as f:
         f.write(lt.bencode(torrent_dict))
