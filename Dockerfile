@@ -1,5 +1,6 @@
 FROM ubuntu:22.04
-# docker run: docker run --rm -it --name torrent1   --privileged   --network=myNetwork   --ipc=host   -e DISPLAY=$DISPLAY   -v /tmp/.X11-unix:/tmp/.X11-unix   -v ${VTRROOT}:${VTRROOT}:rw   -v /dev:/dev   libtorrent
+# docker run: 
+# docker run --rm -it --name torrent1   --privileged   --network=myNetwork   --ipc=host   -e DISPLAY=$DISPLAY   -v /tmp/.X11-unix:/tmp/.X11-unix   -v ${VTRROOT}:${VTRROOT}:rw   -v /dev:/dev   libtorrent
 
 # 1. Install system dependencies
 ENV DEBIAN_FRONTEND=noninteractive
@@ -33,9 +34,8 @@ RUN cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -Ddht=ON \
       -Dcrypto=openssl \
       -Dextensions=ON \
-      -Dmutable-torrents=ON \
       -DPYTHON_EXECUTABLE=/usr/bin/python3.10 \
-      -DCMAKE_CXX_FLAGS="-DTORRENT_USE_OPENSSL=1 -DTORRENT_USE_ED25519=1 -DTORRENT_HAS_DONNA_ED25519=1 -fvisibility=default" \
+      -DCMAKE_CXX_FLAGS="-DTORRENT_USE_OPENSSL=1" \
       .. && \
     make -j$(nproc)
 
