@@ -13,18 +13,15 @@ import sqlite3
 import pandas as pd
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
+from scripts.posegraph.posegraph_utils import *
+from torrent_utils import *
 
 from dataclasses import dataclass, field
 from typing import Optional
 
 import pdb
 
-try:
-    if os.path.exists('scripts/torrent/seeder_params.json'):
-        with open('scripts/torrent/seeder_params.json', "r") as f:
-            params = json.load(f)
-except:
-    print("can't open params, navigate to torrent_ws")
+# zenohd --cfg 'scouting/multicast/enabled:false'
 
 ROBOT_IPS = {
     'mr_green':'192.168.2.42',
@@ -39,110 +36,10 @@ DOCKER_IPS = {
     'torrent1':'172.18.0.4'
 }
 
-if params['device'] == 'docker':
-    TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
-    MY_IP = DOCKER_IPS[params['robot_id']]
-elif params['device'] == 'hunter':
-    TORRENT_WS = "/home/indro/ASRL/vtr3/torrent_ws"
-    MY_IP = ROBOT_IPS[params['robot_id']]
-else:
-    print('bad params')
-
-
-TORRENT_PATH = f"{TORRENT_WS}/deconstructed/0/{params['posegraph']}"
-METADATA_PATH = f"{TORRENT_WS}/scripts/torrent/metadata"
-STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
-
-@dataclass
-class Vertex:
-    vertex_id: int
-
-@dataclass
-class Edge:
-    from_id: int
-    to_id: int
-    xi: Optional[np.ndarray] = None
-    cov: Optional[np.ndarray] = None
-
-    def __repr__(self):
-        return f"Edge({self.from_id}) -> ({self.to_id})"
-    
-
-# -------------------------
-# Persistence
-# -------------------------
-def load_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    return None
-
-def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
-
-
-def parse_chunk(db_path: str) -> tuple[list[Vertex], list[Edge]]:
-    """
-    Parse a single deconstructed .db3 chunk.
-    Returns (vertices, edges) extracted from that chunk.
-    """
-    conn = sqlite3.connect(db_path)
-
-    vertices: list[Vertex] = []
-    edges: list[Edge] = []
-
-    # --- vertices -----------------------------------------------------------
-    try:
-        vtx_df = pd.read_sql_query(
-            "SELECT topic_name, topic_type, timestamp, data FROM vertices", conn
-        )
-        for _, row in vtx_df.iterrows():
-            try:
-                msg = deserialize_message(row["data"], get_message(row["topic_type"]))
-                vertices.append(Vertex(vertex_id=int(msg.id)))
-            except Exception as exc:
-                print(f"[parse_chunk] vertex deserialize error in {db_path}: {exc}")
-    except Exception as exc:
-        print(f"[parse_chunk] no vertices table in {db_path}: {exc}")
-
-    # --- edges --------------------------------------------------------------
-    try:
-        edge_df = pd.read_sql_query(
-            "SELECT topic_name, topic_type, timestamp, data FROM edges", conn
-        )
-        for _, row in edge_df.iterrows():
-            try:
-                msg = deserialize_message(row["data"], get_message(row["topic_type"]))
-                # Only teach-mode edges (mode == 1)
-                if msg.mode.mode != 1:
-                    continue
-                xi = np.array(msg.t_to_from.xi)
-                cov = np.array(msg.t_to_from.cov).reshape(6, 6)
-                edges.append(Edge(from_id=int(msg.from_id), to_id=int(msg.to_id), xi=xi, cov=cov))
-            except Exception as exc:
-                print(f"[parse_chunk] edge deserialize error in {db_path}: {exc}")
-    except Exception as exc:
-        print(f"[parse_chunk] no edges table in {db_path}: {exc}")
-
-    conn.close()
-    return vertices, edges
-
-def vertex_to_dict(v: Vertex) -> dict:
-    return {"id": v.vertex_id}
-
-def edge_to_dict(e: Edge) -> dict:
-    return {
-        "from": e.from_id,
-        "to":   e.to_id,
-        "xi":   e.xi.tolist()  if e.xi  is not None else None,
-        "cov":  e.cov.tolist() if e.cov is not None else None,
-    }
-
 # -------------------------
 # Immutable snapshot
 # -------------------------
-def create_snapshot(input_path, output_path):
+def create_snapshot(input_path, output_path, posegraph):
     """
     Generate new .torrent for a directory
     """
@@ -153,11 +50,8 @@ def create_snapshot(input_path, output_path):
     
     PIECE_SIZE = 2 * 1024 * 1024 # padding
     t.piece_size(PIECE_SIZE)
-
     lt.set_piece_hashes(t, os.path.dirname(input_path))
-
     torrent_dict = t.generate()
-
     # annotate each entry in the dictionary
     for i, file_entry in enumerate(torrent_dict[b"info"][b"files"]):
         # if b"attr" in file_entry and b"p" in file_entry[b"attr"]: # skip padding files
@@ -172,7 +66,7 @@ def create_snapshot(input_path, output_path):
             [edge_to_dict(e) for e in edges], use_bin_type=True
         )
 
-    out_file = os.path.join(output_path, "metadata.torrent")
+    out_file = os.path.join(output_path, f"{posegraph}.torrent")
     ti = lt.torrent_info(torrent_dict)
 
     with open(out_file, "wb") as f:
@@ -180,41 +74,44 @@ def create_snapshot(input_path, output_path):
 
     return ti
 
-def drain_alerts(ses, timeout=10):
-    print('drain alerts')
-    end = time.time() + timeout
-    while time.time() < end:
-        for a in ses.pop_alerts():
-            print(a)
-        time.sleep(0.2)
-
-def has_new_file(directory, last_count=[0]):
-    """
-    Check if file count has increased. True if new file added
-    """
-    current_count = len(os.listdir(directory))
-    if current_count > last_count[0]:
-        last_count[0] = current_count
-        tf = True
-    else:
-        tf = False
-
-    print(f'Is there a new file? {tf}')    
-    return tf
-
-def mutable_to_string(mutable_item):
-    return f"\tkey: {mutable_item['pubkey']}\n \tsalt: {mutable_item['salt']} \n \tseq: {mutable_item['seq']} \n \tinfohash: {mutable_item['infohash']} \n \tmy IP: {mutable_item['my_ip']}"
-
-
 # ======================================================
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description = 'Seed mutable torrents')
+    parser.add_argument('-p', '--posegraph', type=str, default=None, help="Name of posegraph") 
+    parser.add_argument('-a', '--agent_num', type=int, default=0, help="")
+    parser.add_argument('-d', '--device', type=str, default='docker', help="running in \'docker\' or \'hunter\'")
+    parser.add_argument('-s', '--seeder', type=str, default='seeder_params.json', help="path to seeder params")
+    args = parser.parse_args()
 
-    input_path = TORRENT_PATH #input("Directory to seed: ").strip()
-    output_path = METADATA_PATH
+    posegraph = args.posegraph
+    agent = args.agent_num
+    device = args.device
+    seeder_params = args.seeder
+
+    if device == 'docker':
+        torrent_ws = "/home/asrl/ASRL/vtr3/torrent_ws"
+        with open(f'{torrent_ws}/scripts/torrent/{seeder_params}', "r") as f:
+                params = json.load(f)
+        MY_IP = DOCKER_IPS[params['robot_id']]
+        cfg = zenoh.Config()
+        tcp = '["tcp/'+ params['router'] + ':7447"]'
+        cfg.insert_json5("connect/endpoints", tcp)
+    elif device == 'hunter':
+        torrent_ws = "/home/indro/ASRL/vtr3/torrent_ws"
+        with open(f'{torrent_ws}/scripts/torrent/{seeder_params}', "r") as f:
+                params = json.load(f)
+        MY_IP = ROBOT_IPS[params['robot_id']]
+        cfg = zenoh.Config.from_file(f"{torrent_ws}/../warthog/hunter2_zenoh.json5")    
+    else:
+        print('bad params/device')
+
+    input_path = f"{torrent_ws}/deconstructed/{agent}/{params['posegraph']}"
+    output_path = f"{torrent_ws}/scripts/torrent/metadata"
+    state_file = f"{torrent_ws}/scripts/torrent/mutable_state.json"
 
     salt = "submaps" #input("Salt (dataset id): ").strip()
-    state = load_state()
+    state = load_state(state_file=state_file)
     sk = SigningKey(bytes.fromhex(state["sk"]))
 
     mutable_item = {
@@ -236,29 +133,14 @@ if __name__ == "__main__":
     })
     print(f'initiating torrent session took {time.time() - start}')
 
-    start=time.time()
-    if params['device'] == 'docker':
-        print(f'params set for docker')
-        cfg = zenoh.Config()
-        tcp = '["tcp/'+ params['router'] + ':7447"]'
-        cfg.insert_json5(
-            "connect/endpoints",
-            tcp
-        )
-    elif params['device'] == 'hunter':
-        print(f'params set for hunter')
-        cfg = zenoh.Config.from_file(f"{TORRENT_WS}/../warthog/hunter2_zenoh.json5")    
-
     cfg.insert_json5("mode", '"client"')
     cfg.insert_json5("listen/endpoints", "[]")
     session = zenoh.open(cfg)
-    print(f'initiating zenoh session took {time.time() - start}')
 
     # print
     print(f"my IP: {MY_IP}")
     print(f"listening on {ses.listen_port()}")
     print("params: ",  params)
-    start = time.time()
 
     # callback loop
     start_flag = False
@@ -270,15 +152,15 @@ if __name__ == "__main__":
                 start_flag = True
                 print("[deconstructed]: new file")
                 # Create snapshot
-                ti = create_snapshot(input_path, output_path)
+                ti = create_snapshot(input_path, output_path, posegraph=params['posegraph'])
                 infohash = ti.info_hash()
-                mutable_item['infohash'] = infohash.to_bytes()
-                mutable_item['seq']+=1
-                print(f"[torrent] adding mutable item: {mutable_item['infohash']}") #\n{mutable_to_string(mutable_item)}")
                 h = ses.add_torrent({
                     "ti" : ti,
                     "save_path" : os.path.dirname(input_path)
                 })
+                mutable_item['infohash'] = infohash.to_bytes()
+                mutable_item['seq']+=1
+                print(f"[torrent] adding mutable item: {mutable_item['infohash']}") #\n{mutable_to_string(mutable_item)}")
                 payload = msgpack.packb(mutable_item, use_bin_type=True)
                     
             if start_flag:
@@ -290,12 +172,8 @@ if __name__ == "__main__":
                     transfer_start = time.time()
                 if s.progress == 1.0:
                     print(f"completed torrent in {time.time() - transfer_start} s")
-            # alerts
-            # for a in ses.pop_alerts():
-            #     print(a)
             time.sleep(5)
 
     except KeyboardInterrupt:
         print("\nExiting...")
-        print(f'time from callback until killed: {time.time() - start}')
         session.close()
