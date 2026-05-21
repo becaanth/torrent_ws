@@ -5,3 +5,5 @@ log/*
 install/*
 libtorrent/*
 scripts/torrent/*.json
+*.torrent
+**/__pycache__/**

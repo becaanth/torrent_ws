@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 import os
 import yaml
-import pdb
-import argparse
+from dataclasses import dataclass, field
+from typing import Optional
 
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
@@ -267,3 +267,102 @@ def write_rosbag_from_df(df, output_dir, segment_num, partial):
     else:
         write_metadata_yaml(df, bag_path, topic_name, topic_type, segment_num, partial)
         write_rosbag(df, bag_path, topic_name, topic_type, segment_num, partial)
+
+# ================ TORRENTS ========================
+
+@dataclass
+class Vertex:
+    vertex_id: int
+
+@dataclass
+class Edge:
+    from_id: int
+    to_id: int
+    xi: Optional[np.ndarray] = None
+    cov: Optional[np.ndarray] = None
+
+    def __repr__(self):
+        return f"Edge({self.from_id}) -> ({self.to_id})"
+ 
+@dataclass
+class Piece:
+    top_vertices: list[Vertex]
+    top_edges: list[Edge]
+    vertices: Optional[pd.DataFrame] = None
+    edges: Optional[pd.DataFrame] = None
+    pointmap: Optional[pd.DataFrame] = None
+    pointmap_v0: Optional[pd.DataFrame] = None
+    env_info: Optional[pd.DataFrame] = None
+    waypoint_name: Optional[pd.DataFrame] = None
+    vtr_index: Optional[pd.DataFrame] = None
+    pointmap_ptr: Optional[pd.DataFrame] = None
+
+def parse_chunk(db_path: str) -> tuple[list[Vertex], list[Edge]]:
+    """
+    Parse a single deconstructed .db3 chunk.
+    Returns (vertices, edges) extracted from that chunk.
+    """
+    conn = sqlite3.connect(db_path)
+
+    vertices: list[Vertex] = []
+    edges: list[Edge] = []
+
+    # --- vertices -----------------------------------------------------------
+    try:
+        vtx_df = pd.read_sql_query(
+            "SELECT topic_name, topic_type, timestamp, data FROM vertices", conn
+        )
+        for _, row in vtx_df.iterrows():
+            try:
+                msg = deserialize_message(row["data"], get_message(row["topic_type"]))
+                vertices.append(Vertex(vertex_id=int(msg.id)))
+            except Exception as exc:
+                print(f"[parse_chunk] vertex deserialize error in {db_path}: {exc}")
+    except Exception as exc:
+        print(f"[parse_chunk] no vertices table in {db_path}: {exc}")
+
+    # --- edges --------------------------------------------------------------
+    try:
+        edge_df = pd.read_sql_query(
+            "SELECT topic_name, topic_type, timestamp, data FROM edges", conn
+        )
+        for _, row in edge_df.iterrows():
+            try:
+                msg = deserialize_message(row["data"], get_message(row["topic_type"]))
+                # Only teach-mode edges (mode == 1)
+                if msg.mode.mode != 1:
+                    continue
+                xi = np.array(msg.t_to_from.xi)
+                cov = np.array(msg.t_to_from.cov).reshape(6, 6)
+                edges.append(Edge(from_id=int(msg.from_id), to_id=int(msg.to_id), xi=xi)) # ignore cov, cov=cov))
+            except Exception as exc:
+                print(f"[parse_chunk] edge deserialize error in {db_path}: {exc}")
+    except Exception as exc:
+        print(f"[parse_chunk] no edges table in {db_path}: {exc}")
+
+    conn.close()
+    return vertices, edges
+
+def vertex_to_dict(v: Vertex) -> dict:
+    return {"id": v.vertex_id}
+
+def edge_to_dict(e: Edge) -> dict:
+    return {
+        "from": e.from_id,
+        "to":   e.to_id,
+        "xi":   e.xi.tolist()  if e.xi  is not None else None,
+        # "cov":  e.cov.tolist() if e.cov is not None else None, ignore cov
+    }
+
+# ============= GRAPH UTILS ============
+def extract_robot_id(node_id: int) -> int:
+    return (node_id >> 60) & 0xF
+
+def extract_major_id(node_id: int) -> int:
+    return (node_id >> 16) & 0xFFFFFFFFFFF
+
+def extract_minor_id(node_id: int) -> int:
+    return (node_id) & 0xFFFF
+
+def is_root(node_id: int) -> bool:
+    return extract_minor_id(node_id) == 0

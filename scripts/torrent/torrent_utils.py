@@ -4,7 +4,7 @@ import json
 import msgpack
 import pprint
 import libtorrent as lt
-from scripts.posegraph.posegraph_utils import *
+from posegraph.posegraph_utils import *
 
 # -------------------------
 # Persistence
@@ -46,16 +46,15 @@ def mutable_to_string(mutable_item):
     return f"\tkey: {mutable_item['pubkey']}\n \tsalt: {mutable_item['salt']} \n \tseq: {mutable_item['seq']} \n \tinfohash: {mutable_item['infohash']} \n \tmy IP: {mutable_item['my_ip']}"
 
 # inspection
-
-    
 def inspect_torrent(path):
     raw = lt.bdecode(open(path, "rb").read())
     info = raw[b"info"]
 
-    print(f"Name:   {info[b'name'].decode()}")
-    print(f"Pieces: {len(info[b'pieces']) // 20} x {info.get(b'piece length', '?')} bytes")
-    print()
+    # print(f"Name:   {info[b'name'].decode()}")
+    # print(f"Pieces: {len(info[b'pieces']) // 20} x {info.get(b'piece length', '?')} bytes")
+    # print()
 
+    pieces : list[Piece] = []
     for file_entry in info.get(b"files", []):
         rel_path = "/".join(p.decode() for p in file_entry[b"path"])
         size = file_entry[b"length"]
@@ -66,7 +65,21 @@ def inspect_torrent(path):
         }
         print(f"  {rel_path}  ({size} bytes)")
         if extras:
-            vertices = msgpack.unpackb(file_entry[b"x-vertices"], raw=False)
-            edges    = msgpack.unpackb(file_entry[b"x-edges"],    raw=False)
-            pprint.pprint(vertices, indent=4)
-            pprint.pprint(edges, indent=8)
+            raw_vertices = msgpack.unpackb(file_entry[b"x-vertices"], raw=False)
+            raw_edges    = msgpack.unpackb(file_entry[b"x-edges"],    raw=False)
+            # pprint.pprint(raw_vertices, indent=4)
+            # pprint.pprint(raw_edges, indent=8)
+
+            # package into classes
+            vertices, edges = [],[]
+            for raw_vertex in raw_vertices:
+                vertices.append(Vertex(vertex_id=raw_vertex['id']))
+            for raw_edge in raw_edges:
+                edges.append(Edge(
+                    from_id=raw_edge['from'],
+                    to_id=raw_edge['to'],
+                    xi=raw_edge['xi'],
+                ))
+            pieces.append(Piece(top_vertices=vertices, top_edges=edges))
+
+    return pieces
