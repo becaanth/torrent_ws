@@ -13,7 +13,7 @@ import sqlite3
 import pandas as pd
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
-from scripts.posegraph.posegraph_utils import *
+from posegraph.posegraph_utils import *
 from torrent_utils import *
 
 from dataclasses import dataclass, field
@@ -106,7 +106,8 @@ if __name__ == "__main__":
     else:
         print('bad params/device')
 
-    input_path = f"{torrent_ws}/deconstructed/{agent}/{params['posegraph']}"
+    # input_path = f"{torrent_ws}/deconstructed/{agent}/{params['posegraph']}"
+    input_path = f"{os.getenv('VTRTEMP')}/pcs/{params['posegraph']}"
     output_path = f"{torrent_ws}/scripts/torrent/metadata"
     state_file = f"{torrent_ws}/scripts/torrent/mutable_state.json"
 

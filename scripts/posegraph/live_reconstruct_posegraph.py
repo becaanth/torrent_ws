@@ -73,7 +73,7 @@ class LiveReconstructor:
         }
 
         # make directories for VTR
-        print(f'self.output_dir: {self.output_dir}')
+        print(f'[INIT]: self.output_dir: {self.output_dir}')
         for key, topic in self.topics.items():
             if key == 'index': 
                 os.makedirs(f'{self.output_dir}/index', exist_ok=True)
@@ -164,6 +164,7 @@ class LiveReconstructor:
 
         conn.close()
         # preview_piece(poll_data)
+
         to_id = inspect_ros_data(poll_data['edges'].iloc[-1]).to_id
         from_id = inspect_ros_data(poll_data['edges'].iloc[0]).from_id
 
@@ -174,7 +175,7 @@ class LiveReconstructor:
         first_vid = inspect_ros_data(poll_data['vertices'].iloc[0]).id
         for i, piece in enumerate(self.pieces):
             if first_vid == piece.top_vertices[0].vertex_id:
-                print("MATCH")
+                print("[INGEST]: match found")
                 self.pieces[i].vertices = poll_data['vertices']
                 self.pieces[i].edges = poll_data['edges']
                 self.pieces[i].pointmap = poll_data['pointmap']
@@ -203,7 +204,7 @@ class LiveReconstructor:
             self._conns[k] = sqlite3.connect(path)
             self._cursors[k] = self._conns[k].cursor()
             
-            print(f'init: {k} at {self._conns[k]}, cursor {self._cursors[k]}, topic {self.topics[k]}')
+            print(f'[INIT_DB]: {k} at {self._conns[k]}, cursor {self._cursors[k]}, topic {self.topics[k]}')
             
             self._cursors[k].execute("""
                 CREATE TABLE topics (
@@ -230,7 +231,7 @@ class LiveReconstructor:
             """, (k, self.topics[k], "cdr", ""))
             self._last_rowid[k] = self._cursors[k].lastrowid
             self._conns[k].commit()
-            print(f"Initialized: {self._db_relpaths[k]} | topic_id={self.topics[k]}")
+            print(f"[INIT_DB]: Initialized: {self._db_relpaths[k]} | topic_id={self.topics[k]}")
 
     def _write_message(self, piece: Piece):
         """
@@ -266,6 +267,7 @@ class LiveReconstructor:
 
     # ============= DEBUG ==================
     def _plot_preview(self):
+        # TODO:
         print('_plot_preview')
 
     # ============= CLEANUP ================
@@ -276,8 +278,6 @@ class LiveReconstructor:
                 conn.close()
                 self._conns[k] = None
         print("[LiveReconstructor] connections closed.")
-
-
 
 # +++++++++++++ HELPERS ++++++++++++++++
 def preview_piece(piece):
@@ -312,7 +312,7 @@ if __name__ == "__main__":
     piece_path = os.path.join(args.piece_root, args.bag_name)
     metadata_path = args.metadata
 
-    print(f'output_dir: {output_dir}')
+    print(f'[MAIN]: output_dir: {output_dir}')
     rec = LiveReconstructor(
         deconstructed_path=piece_path,
         metadata_path=metadata_path,
