@@ -6,4 +6,4 @@ install/*
 libtorrent/*
 scripts/torrent/*.json
 *.torrent
-**/__pycache__/**
+*.pyc
