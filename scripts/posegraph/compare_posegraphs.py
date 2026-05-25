@@ -1,11 +1,11 @@
 import argparse
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 
 from posegraph_utils import *
 
-ORIGINAL_ROOT      = '/home/asrl/ASRL/vtr3/temp'
-RECONSTRUCTED_ROOT = '/home/asrl/ASRL/vtr3/temp'
+ORIGINAL_ROOT      = '/home/asrl/ASRL/vtr3/temp/pgs'
+RECONSTRUCTED_ROOT = '/home/asrl/ASRL/vtr3/temp/pgs'
 
 
 def compare_posegraphs(bag_name: str):
@@ -77,14 +77,14 @@ def compare_posegraphs(bag_name: str):
         print(f'{k:<18} {v}')
 
     # ----------------------------------------------------------------------- plot
-    plt.figure()
-    plt.plot(orig_vids,  label='original',      marker='.', linestyle='none')
-    plt.plot(recon_vids, label='reconstructed', marker='.', linestyle='none')
-    plt.xlabel('index in .db3')
-    plt.ylabel('vertex id')
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    # plt.figure()
+    # plt.plot(orig_vids,  label='original',      marker='.', linestyle='none')
+    # plt.plot(recon_vids, label='reconstructed', marker='.', linestyle='none')
+    # plt.xlabel('index in .db3')
+    # plt.ylabel('vertex id')
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.show()
 
 
 if __name__ == '__main__':
