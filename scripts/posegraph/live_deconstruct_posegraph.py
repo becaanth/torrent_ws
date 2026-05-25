@@ -375,12 +375,12 @@ if __name__ == "__main__":
     parser.add_argument('-b', '--bag_name', required=True,help="Bag name (subdirectory under folder_path)")
     parser.add_argument('--agent', type=int, default=0)
     parser.add_argument('--poll_hz', type=float, default=1.0)
-    parser.add_argument('--folder_path', default='/home/asrl/ASRL/vtr3/temp')
-    parser.add_argument('--output_root', default='/home/asrl/ASRL/vtr3/torrent_ws/deconstructed')
+    parser.add_argument('--posegraph_root', default='/home/asrl/ASRL/vtr3/temp/pgs')
+    parser.add_argument('--piece_root', default='/home/asrl/ASRL/vtr3/temp/pcs')
     args = parser.parse_args()
 
-    bag_path   = os.path.join(args.folder_path, args.bag_name, 'graph')
-    output_dir = os.path.join(args.output_root, str(args.agent), args.bag_name)
+    bag_path   = os.path.join(args.posegraph_root, args.bag_name, 'graph')
+    output_dir = os.path.join(args.piece_root, args.bag_name)
 
     dec = LiveDeconstructor(
         bag_path=bag_path,

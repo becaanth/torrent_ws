@@ -302,14 +302,14 @@ if __name__ == "__main__":
     parser.add_argument('-m', '--metadata', type=str, default='/home/asrl/ASRL/vtr3/torrent_ws/scripts/torrent/metadata', help="")
     parser.add_argument('-r', '--robot_id', type=int, default=0, help="")
     parser.add_argument('--poll_hz', type=float, default=1.0)
-    parser.add_argument('--output_root', default='/home/asrl/ASRL/vtr3/temp')
-    parser.add_argument('--folder_path', default='/home/asrl/ASRL/vtr3/torrent_ws/deconstructed')
+    parser.add_argument('--posegraph_root', default='/home/asrl/ASRL/vtr3/temp/pgs')
+    parser.add_argument('--piece_root', default='/home/asrl/ASRL/vtr3/temp/pcs')
     args = parser.parse_args()
     bag_name = args.bag_name
     robot_id = args.robot_id
 
-    output_dir = os.path.join(args.output_root, f"r{bag_name}", 'graph')
-    piece_path   = os.path.join(args.folder_path, str(robot_id), args.bag_name)
+    output_dir = os.path.join(args.posegraph_root, f"r{bag_name}", 'graph')
+    piece_path = os.path.join(args.piece_root, args.bag_name)
     metadata_path = args.metadata
 
     print(f'output_dir: {output_dir}')
