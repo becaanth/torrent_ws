@@ -13,6 +13,9 @@ from rosidl_runtime_py.utilities import get_message
 from posegraph_utils import *
 from torrent.torrent_utils import *
 
+from vtr_pose_graph_msgs.msg import Vertex, Edge, EdgeType, EdgeMode
+from vtr_common_msgs.msg import LieGroupTransform
+
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -90,6 +93,7 @@ class LiveReconstructor:
         self._last_rowid = {k: 0 for k in self._db_relpaths}    
         self._init_database()
         self._index_written = False
+        self._metadata_written = False # TODO: be more clever
 
         # file tracking
         self.db_files = []
@@ -124,13 +128,27 @@ class LiveReconstructor:
             print('[ERROR]: no metadata')
             return
         
-        # get topology
-        # TODO: handle metadata files that update
-        # TODO: this will have to be live instead of written-to .torrents
+
+        # Rebuild pieces from metadata, preserving existing skeleton_rowids
+        existing = {p.top_vertices[0].vertex_id: p for p in self.pieces}
+        new_pieces = []
         for metadata_file in self.metadata_files:
             fname = os.path.join(self.metadata_path, metadata_file)
-            self.pieces = self._parse_metadata(fname)
+            for piece in self._parse_metadata(fname):
+                vid = piece.top_vertices[0].vertex_id
+                if vid in existing:
+                    new_pieces.append(existing[vid])  # preserve rowids
+                else:
+                    new_pieces.append(piece)
+        self.pieces = new_pieces
 
+        # Write metadata skeletons for any piece not yet written
+        for piece in self.pieces:
+            if not piece.skeleton_rowids:  # empty dict = not yet written
+                self._write_metadata(piece)
+        
+        # TODO: handle metadata files that update
+        # TODO: this will have to be live instead of written-to .torrents
         self.db_files = sorted(
             [f for f in os.listdir(self.deconstructed_path) if f.endswith('.db3')],
             key=lambda x: int(x.split('.')[0], 16)
@@ -158,15 +176,15 @@ class LiveReconstructor:
             try:
                 df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
                 poll_data[table] = df
-            except Exception as e:
-                print(f"Warning: Could not read table {table} from {db_file}: {e}")
+            except:
+                print(f"Warning: Could not read table {table} from {db_file}")
                 poll_data[table] = pd.DataFrame() 
 
         conn.close()
         # preview_piece(poll_data)
 
-        to_id = inspect_ros_data(poll_data['edges'].iloc[-1]).to_id
-        from_id = inspect_ros_data(poll_data['edges'].iloc[0]).from_id
+        # to_id = inspect_ros_data(poll_data['edges'].iloc[-1]).to_id
+        # from_id = inspect_ros_data(poll_data['edges'].iloc[0]).from_id
 
         return poll_data
     
@@ -233,6 +251,36 @@ class LiveReconstructor:
             self._conns[k].commit()
             print(f"[INIT_DB]: Initialized: {self._db_relpaths[k]} | topic_id={self.topics[k]}")
 
+    def _write_metadata(self, piece: Piece):
+        """
+        Write skeleton rows for vertices and edges using topology from top_vertices/top_edges.
+        data is NULL until the real piece arrives.
+        """
+        rowids = {'vertices':[], 'edges':[]}
+        # populate ROS2 messages with topology information    
+        for v in piece.top_vertices:
+            m_v = Vertex(id=v.vertex_id)
+            s_v = serialize_message(m_v)
+            self._cursors['vertices'].execute("""
+                INSERT INTO messages (topic_id, timestamp, data)
+                VALUES (?, ?, ?)
+            """, (self._last_rowid['vertices'], -1, s_v)) # timestamp is -1 default
+            rowids['vertices'].append(self._cursors['vertices'].lastrowid)
+
+        for e in piece.top_edges:
+            tf = LieGroupTransform(xi = e.xi, cov_set=False)
+            m_e = Edge(type=EdgeType(), mode=EdgeMode(), from_id=e.from_id, to_id=e.to_id, t_to_from=tf)
+            s_e = serialize_message(m_e)
+            self._cursors['edges'].execute("""
+                INSERT INTO messages (topic_id, timestamp, data)
+                VALUES (?, ?, ?)
+            """, (self._last_rowid['edges'], -1, s_e)) # timestamp is -1 default
+            rowids['edges'].append(self._cursors['edges'].lastrowid)
+
+        self._conns['vertices'].commit()
+        self._conns['edges'].commit()
+        piece.skeleton_rowids = rowids
+
     def _write_message(self, piece: Piece):
         """
         Connect to existing conns and write messages
@@ -242,7 +290,8 @@ class LiveReconstructor:
             'index':       'vtr_index',
             'pointmap_v0': 'pointmap',
         }
-
+        skeleton_keys = {'vertices', 'edges'}
+    
         for k in self._cursors:
             if k == 'index' and self._index_written:
                 continue
@@ -253,13 +302,22 @@ class LiveReconstructor:
                 print(f"[WRITE] Skipping '{k}': no data")
                 continue
 
-            self._cursors[k].executemany("""
-                INSERT INTO messages (topic_id, timestamp, data)
-                VALUES (?, ?, ?)
-            """,  [
-                (self._last_rowid[k], int(row['timestamp']), row['data'])
-                for _, row in df.iterrows()
-            ])
+            if k in skeleton_keys and piece.skeleton_rowids.get(k):
+                # Fill in the NULL skeletons in order
+                for rowid, (_, row) in zip(piece.skeleton_rowids[k], df.iterrows()):
+                    self._cursors[k].execute("""
+                    UPDATE messages SET data = ?, timestamp = ?
+                    WHERE id = ?
+                """, (row['data'], int(row['timestamp']), rowid))
+            else:                                             
+                self._cursors[k].executemany("""
+                    INSERT INTO messages (topic_id, timestamp, data)
+                    VALUES (?, ?, ?)
+                """,  [
+                    (self._last_rowid[k], int(row['timestamp']), row['data'])
+                    for _, row in df.iterrows()
+                ])
+            
             self._conns[k].commit()
 
             if k == 'index':
