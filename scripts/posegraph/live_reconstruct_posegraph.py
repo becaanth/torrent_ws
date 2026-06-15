@@ -162,6 +162,7 @@ class LiveReconstructor:
                 continue
 
             poll_data = self._parse_piece(db_file)
+            time.sleep(0.5)
             self._ingest_piece(poll_data)
 
             self.db_written.append(db_file)
@@ -269,7 +270,9 @@ class LiveReconstructor:
 
         for e in piece.top_edges:
             tf = LieGroupTransform(xi = e.xi, cov_set=False)
-            m_e = Edge(type=EdgeType(), mode=EdgeMode(), from_id=e.from_id, to_id=e.to_id, t_to_from=tf)
+            edge_mode = EdgeMode()
+            edge_mode.mode = EdgeMode.UNKNOWN
+            m_e = Edge(type=EdgeType(), mode=edge_mode, from_id=e.from_id, to_id=e.to_id, t_to_from=tf)
             s_e = serialize_message(m_e)
             self._cursors['edges'].execute("""
                 INSERT INTO messages (topic_id, timestamp, data)
@@ -291,7 +294,6 @@ class LiveReconstructor:
             'pointmap_v0': 'pointmap',
         }
         skeleton_keys = {'vertices', 'edges'}
-    
         for k in self._cursors:
             if k == 'index' and self._index_written:
                 continue

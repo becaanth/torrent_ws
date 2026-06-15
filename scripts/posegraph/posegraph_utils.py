@@ -288,6 +288,8 @@ class Edge:
 class Piece:
     top_vertices: list[Vertex]
     top_edges: list[Edge]
+    metadata_written: bool
+    skeleton_rowids: dict = field(default_factory=dict)
     vertices: Optional[pd.DataFrame] = None
     edges: Optional[pd.DataFrame] = None
     pointmap: Optional[pd.DataFrame] = None
