@@ -86,7 +86,8 @@ class LiveReconstructor:
                 os.makedirs(f'{self.output_dir}/data/{key}', exist_ok=True)
 
         # initiate sqlite connections and cursors
-        self._conns: dict[str, sqlite3.Connection | None] = {k: sqlite3.connect(path) for k, path in self._db_relpaths.items()}
+        self._conns: dict[str, sqlite3.Connection | None] = {k: sqlite3.connect(path, isolation_level=None) for k, path in self._db_relpaths.items()}
+
         self._cursors: dict[str, sqlite3.Cursor | None] = {k: self._conns[k].cursor() for k in self._conns}
 
         # per-source row cursors (last rowid seen)
@@ -162,7 +163,7 @@ class LiveReconstructor:
                 continue
 
             poll_data = self._parse_piece(db_file)
-            time.sleep(0.5)
+            time.sleep(0.25) # ANTHONY
             self._ingest_piece(poll_data)
 
             self.db_written.append(db_file)
@@ -172,7 +173,9 @@ class LiveReconstructor:
         Read from a submap-wise .db3
         """
         poll_data = {}
-        conn = sqlite3.connect(os.path.join(self.deconstructed_path, db_file))
+        conn = sqlite3.connect(os.path.join(self.deconstructed_path, db_file), isolation_level=None)
+        conn.execute("PRAGMA journal_mode=WAL;")
+
         for table in self.tables:
             try:
                 df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
@@ -220,7 +223,9 @@ class LiveReconstructor:
             if os.path.exists(path):
                 os.remove(path)
             # reconnect to fresh file
-            self._conns[k] = sqlite3.connect(path)
+            self._conns[k] = sqlite3.connect(path, isolation_level=None)
+            self._conns[k].execute("PRAGMA journal_mode=WAL;")
+
             self._cursors[k] = self._conns[k].cursor()
             
             print(f'[INIT_DB]: {k} at {self._conns[k]}, cursor {self._cursors[k]}, topic {self.topics[k]}')
