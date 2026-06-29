@@ -32,9 +32,9 @@ if __name__ == '__main__':
     agent = args.agent_num
 
     # folder_path = '/home/asrl/ASRL/vtr3/temp/nanook/posegraph'
-    folder_path = '/home/asrl/ASRL/vtr3/temp'
+    folder_path = '/home/asrl/ASRL/vtr3/temp/pgs'
     bag_path = f'{folder_path}/{bag_name}/graph'
-    deconstructed_path = f'/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/{agent}/'
+    deconstructed_path = f'/home/asrl/ASRL/vtr3/temp/pcs'
 
     vertices = get_db3_elements(bag_path, 'vertices')
     edges = get_db3_elements(bag_path, 'edges')

@@ -11,7 +11,7 @@ from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
 from torrent_utils import *
-from scripts.posegraph.posegraph_utils import *
+from posegraph.posegraph_utils import *
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = 'Seed mutable torrents')
