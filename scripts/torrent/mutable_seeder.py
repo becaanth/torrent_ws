@@ -52,12 +52,20 @@ def create_snapshot(input_path, output_path, posegraph):
     t.piece_size(PIECE_SIZE)
     lt.set_piece_hashes(t, os.path.dirname(input_path))
     torrent_dict = t.generate()
+    wrote_idx = False
     # annotate each entry in the dictionary
     for i, file_entry in enumerate(torrent_dict[b"info"][b"files"]):
         # if b"attr" in file_entry and b"p" in file_entry[b"attr"]: # skip padding files
         #     continue
         filename = file_entry[b"path"][-1].decode()
         print(f"{input_path}/{filename}")
+        if wrote_idx == False:
+            idx = get_map_info(f"{input_path}/{filename}")
+            file_entry[b"x-idx"] = msgpack.packb(
+                {"idx": idx_to_dict(idx)}, use_bin_type=True
+            )
+            wrote_idx = True
+
         vertices, edges = parse_chunk(f"{input_path}/{filename}")
         file_entry[b"x-vertices"] = msgpack.packb(
             [vertex_to_dict(v) for v in vertices], use_bin_type=True
@@ -89,6 +97,7 @@ if __name__ == "__main__":
     device = args.device
     seeder_params = args.seeder
 
+    # Networking setup
     if device == 'docker':
         torrent_ws = "/home/asrl/ASRL/vtr3/torrent_ws"
         with open(f'{torrent_ws}/scripts/torrent/{seeder_params}', "r") as f:
@@ -106,7 +115,7 @@ if __name__ == "__main__":
     else:
         print('bad params/device')
 
-    # input_path = f"{torrent_ws}/deconstructed/{agent}/{params['posegraph']}"
+    # File setup
     input_path = f"{os.getenv('VTRTEMP')}/pcs/{params['posegraph']}"
     output_path = f"{torrent_ws}/scripts/torrent/metadata"
     state_file = f"{torrent_ws}/scripts/torrent/mutable_state.json"
@@ -115,6 +124,7 @@ if __name__ == "__main__":
     state = load_state(state_file=state_file)
     sk = SigningKey(bytes.fromhex(state["sk"]))
 
+    # Define a mutable item
     mutable_item = {
         'pubkey' : sk.verify_key.encode(),
         'salt' : salt,
@@ -123,8 +133,8 @@ if __name__ == "__main__":
         'my_ip' : MY_IP
     }
 
+    # Initiate torrent session
     start=time.time()
-    # initiate torrent session
     ses = lt.session({
         "listen_interfaces": f"{MY_IP}:6881,[::]:6881",
         "enable_dht": False,
@@ -134,14 +144,12 @@ if __name__ == "__main__":
     })
     print(f'initiating torrent session took {time.time() - start}')
 
+    # Setup Zenoh
     cfg.insert_json5("mode", '"client"')
     cfg.insert_json5("listen/endpoints", "[]")
     session = zenoh.open(cfg)
 
-    # print
-    print(f"my IP: {MY_IP}")
-    print(f"listening on {ses.listen_port()}")
-    print("params: ",  params)
+    print(f"my IP: {MY_IP} listening on {ses.listen_port()} params: {params}")
 
     # callback loop
     start_flag = False
@@ -151,14 +159,11 @@ if __name__ == "__main__":
         while True:
             if has_new_file(input_path) or start_flag == False:
                 start_flag = True
-                print("[deconstructed]: new file")
+                
                 # Create snapshot
                 ti = create_snapshot(input_path, output_path, posegraph=params['posegraph'])
                 infohash = ti.info_hash()
-                h = ses.add_torrent({
-                    "ti" : ti,
-                    "save_path" : os.path.dirname(input_path)
-                })
+                h = ses.add_torrent({"ti" : ti, "save_path" : os.path.dirname(input_path)})
                 mutable_item['infohash'] = infohash.to_bytes()
                 mutable_item['seq']+=1
                 print(f"[torrent] adding mutable item: {mutable_item['infohash']}") #\n{mutable_to_string(mutable_item)}")
@@ -168,6 +173,7 @@ if __name__ == "__main__":
                 print("[zenoh]: pub mutable item")
                 session.put(f"mutable_items/{params['robot_id']}", payload)            
                 s = h.status()
+                
                 print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
                 if s.progress == 0.0:
                     transfer_start = time.time()

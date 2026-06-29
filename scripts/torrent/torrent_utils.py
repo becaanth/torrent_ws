@@ -50,9 +50,8 @@ def inspect_torrent(path):
     raw = lt.bdecode(open(path, "rb").read())
     info = raw[b"info"]
 
-    # print(f"Name:   {info[b'name'].decode()}")
-    # print(f"Pieces: {len(info[b'pieces']) // 20} x {info.get(b'piece length', '?')} bytes")
-    # print()
+    # get MapInfo
+    idx = msgpack.unpackb(info[b'files'][0][b'x-idx'], raw=False)
 
     pieces : list[Piece] = []
     for file_entry in info.get(b"files", []):
@@ -82,4 +81,4 @@ def inspect_torrent(path):
                 ))
             pieces.append(Piece(top_vertices=vertices, top_edges=edges, metadata_written=False))
 
-    return pieces
+    return pieces, idx['idx']

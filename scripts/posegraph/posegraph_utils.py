@@ -345,6 +345,12 @@ def parse_chunk(db_path: str) -> tuple[list[Vertex], list[Edge]]:
     conn.close()
     return vertices, edges
 
+def get_map_info(db_path: str):
+    conn = sqlite3.connect(db_path)
+    idx_df = pd.read_sql_query("SELECT topic_name, topic_type, timestamp, data FROM vtr_index", conn)
+    idx_msg = deserialize_message(idx_df.iloc[0]["data"], get_message(idx_df.iloc[0]["topic_type"]))
+    return idx_msg
+
 def vertex_to_dict(v: Vertex) -> dict:
     return {"id": v.vertex_id}
 
@@ -354,6 +360,18 @@ def edge_to_dict(e: Edge) -> dict:
         "to":   e.to_id,
         "xi":   e.xi.tolist()  if e.xi  is not None else None,
         # "cov":  e.cov.tolist() if e.cov is not None else None, ignore cov
+    }
+
+def idx_to_dict(index_msg) -> dict:
+    return {
+        "curr_major_id": index_msg._curr_major_id,
+        "curr_minor_id": index_msg._curr_minor_id,
+        "set": index_msg._map_info.set,
+        "root_vid": index_msg._map_info.root_vid,
+        "lng": index_msg._map_info.lng,
+        "lat": index_msg._map_info.lat,
+        "theta": index_msg._map_info.theta,
+        "scale":index_msg._map_info.scale 
     }
 
 # ============= GRAPH UTILS ============

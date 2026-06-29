@@ -14,6 +14,7 @@ from posegraph_utils import *
 from torrent.torrent_utils import *
 
 from vtr_pose_graph_msgs.msg import Vertex, Edge, EdgeType, EdgeMode
+from vtr_pose_graph_msgs.msg import Graph, MapInfo
 from vtr_common_msgs.msg import LieGroupTransform
 
 from dataclasses import dataclass, field
@@ -91,7 +92,7 @@ class LiveReconstructor:
         # per-source row cursors (last rowid seen)
         self._last_rowid = {k: 0 for k in self._db_relpaths}    
         self._init_database()
-        self._index_written = False # ANTHONY this was false before 06/25
+        self._index_written = False
         self._metadata_written = False # TODO: be more clever
 
         # file tracking
@@ -138,23 +139,29 @@ class LiveReconstructor:
         if not self.metadata_files:
             print('[ERROR]: no metadata')
             return
-        
+
         # Rebuild pieces from metadata, preserving existing skeleton_rowids
         existing = {p.top_vertices[0].vertex_id: p for p in self.pieces}
         new_pieces = []
         for metadata_file in self.metadata_files:
             fname = os.path.join(self.metadata_path, metadata_file)
-            for piece in self._parse_metadata(fname):
+            pieces, idx = self._parse_metadata(fname)
+            if not self._index_written: # write MapInfo
+                self._write_index(idx)
+                self._index_written = True            
+
+            for piece in pieces:
                 vid = piece.top_vertices[0].vertex_id
                 if vid in existing:
                     new_pieces.append(existing[vid])  # preserve rowids
                 else:
                     new_pieces.append(piece)
         self.pieces = new_pieces
-
+      
         # Write metadata skeletons for any piece not yet written
         for piece in self.pieces:
             if not piece.skeleton_rowids:  # empty dict = not yet written
+                time.sleep(1.0) # ANTHONY - delay for dev
                 self._write_metadata(piece)
         
         # TODO: handle metadata files that update
@@ -172,7 +179,6 @@ class LiveReconstructor:
                 continue
 
             poll_data = self._parse_piece(db_file)
-            time.sleep(1.0) # ANTHONY
             self._ingest_piece(poll_data)
 
             self.db_written.append(db_file)
@@ -193,10 +199,6 @@ class LiveReconstructor:
                 poll_data[table] = pd.DataFrame() 
 
         conn.close()
-        # preview_piece(poll_data)
-
-        # to_id = inspect_ros_data(poll_data['edges'].iloc[-1]).to_id
-        # from_id = inspect_ros_data(poll_data['edges'].iloc[0]).from_id
 
         return poll_data
     
@@ -218,9 +220,9 @@ class LiveReconstructor:
                 self.pieces.pop(i)
 
     def _parse_metadata(self, metadata_file: str):
-        pieces = inspect_torrent(metadata_file)
+        pieces, idx = inspect_torrent(metadata_file)
         # create piece with topology preview
-        return pieces
+        return pieces, idx
         
     # ============ .db3 INTERFACE ==============
     def _init_database(self):
@@ -314,7 +316,7 @@ class LiveReconstructor:
         }
         skeleton_keys = {'vertices', 'edges'}
         for k in self._db_relpaths:
-            if k == 'index' and self._index_written:
+            if k == 'index':
                 continue
             
             field = field_map.get(k, k)  # use mapped name if exists, else k itself
@@ -343,9 +345,33 @@ class LiveReconstructor:
                 
                 conn.execute("COMMIT;")
 
-            if k == 'index':
-                self._index_written = True
             print(f"_write_message: {time.time() - s}")
+
+    def _write_index(self, index_msg):
+        # write index.db3, containing MapInfo message
+        map_info = MapInfo(
+            set=index_msg['set'],
+            root_vid=index_msg['root_vid'],
+            lng=index_msg['lng'],
+            lat=index_msg['lat'],
+            theta=index_msg['theta'],
+            scale=index_msg['scale']
+        )
+        graph = Graph(
+            curr_major_id=index_msg['curr_major_id'],
+            curr_minor_id=index_msg['curr_minor_id'],
+            map_info=map_info
+        )
+
+        with self._open('index') as conn:
+            conn.execute("BEGIN;")
+            s_graph = serialize_message(graph)
+            cur = conn.execute("""
+                INSERT INTO messages (topic_id, timestamp, data)
+                VALUES (?, ?, ?)
+            """, (1, -1, s_graph)) # timestamp is -1 default            
+            conn.execute("COMMIT;")
+
 
     # ============= DEBUG ==================
     def _plot_preview(self):
