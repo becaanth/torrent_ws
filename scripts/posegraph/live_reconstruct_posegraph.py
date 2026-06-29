@@ -18,7 +18,7 @@ from vtr_common_msgs.msg import LieGroupTransform
 
 from dataclasses import dataclass, field
 from typing import Optional
-
+import contextlib
 
 class LiveReconstructor:
     """
@@ -88,12 +88,10 @@ class LiveReconstructor:
         # initiate sqlite connections and cursors
         self._conns: dict[str, sqlite3.Connection | None] = {k: sqlite3.connect(path, isolation_level=None) for k, path in self._db_relpaths.items()}
 
-        self._cursors: dict[str, sqlite3.Cursor | None] = {k: self._conns[k].cursor() for k in self._conns}
-
         # per-source row cursors (last rowid seen)
         self._last_rowid = {k: 0 for k in self._db_relpaths}    
         self._init_database()
-        self._index_written = False
+        self._index_written = False # ANTHONY this was false before 06/25
         self._metadata_written = False # TODO: be more clever
 
         # file tracking
@@ -117,6 +115,18 @@ class LiveReconstructor:
             self._close()
 
     # ============= PRIVATE ================
+    @contextlib.contextmanager
+    def _open(self, key):
+        """Short-lived connection, guaranteed to close even on error."""
+        conn = sqlite3.connect(self._db_relpaths[key], isolation_level=None, timeout=5.0)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
+            conn.execute("PRAGMA busy_timeout=5000;")
+            yield conn
+        finally:
+            conn.close()
+
     def _poll(self):
         """
         Read new deconstructed data, metadata
@@ -129,7 +139,6 @@ class LiveReconstructor:
             print('[ERROR]: no metadata')
             return
         
-
         # Rebuild pieces from metadata, preserving existing skeleton_rowids
         existing = {p.top_vertices[0].vertex_id: p for p in self.pieces}
         new_pieces = []
@@ -163,7 +172,7 @@ class LiveReconstructor:
                 continue
 
             poll_data = self._parse_piece(db_file)
-            time.sleep(0.25) # ANTHONY
+            time.sleep(1.0) # ANTHONY
             self._ingest_piece(poll_data)
 
             self.db_written.append(db_file)
@@ -174,7 +183,6 @@ class LiveReconstructor:
         """
         poll_data = {}
         conn = sqlite3.connect(os.path.join(self.deconstructed_path, db_file), isolation_level=None)
-        conn.execute("PRAGMA journal_mode=WAL;")
 
         for table in self.tables:
             try:
@@ -222,84 +230,90 @@ class LiveReconstructor:
         for k, path in self._db_relpaths.items():
             if os.path.exists(path):
                 os.remove(path)
-            # reconnect to fresh file
-            self._conns[k] = sqlite3.connect(path, isolation_level=None)
-            self._conns[k].execute("PRAGMA journal_mode=WAL;")
+            for sidecar in (path + "-wal", path + "-shm"):
+                if os.path.exists(sidecar):
+                    os.remove(sidecar)
 
-            self._cursors[k] = self._conns[k].cursor()
+            # reconnect to fresh file
+            with self._open(k) as conn:
+                print(f'[INIT_DB]: {k} at {self._conns[k]}, topic {self.topics[k]}')
             
-            print(f'[INIT_DB]: {k} at {self._conns[k]}, cursor {self._cursors[k]}, topic {self.topics[k]}')
-            
-            self._cursors[k].execute("""
-                CREATE TABLE topics (
-                    id INTEGER PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    type TEXT NOT NULL,
-                    serialization_format TEXT NOT NULL,
-                    offered_qos_profiles TEXT
-                )
-            """)
-            self._cursors[k].execute("""
-                CREATE TABLE messages (
-                    id INTEGER PRIMARY KEY,
-                    topic_id INTEGER NOT NULL,
-                    timestamp INTEGER NOT NULL,
-                    data BLOB NOT NULL
-                )
-            """)       
+                conn.execute("""
+                    CREATE TABLE topics (
+                        id INTEGER PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        type TEXT NOT NULL,
+                        serialization_format TEXT NOT NULL,
+                        offered_qos_profiles TEXT
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE messages (
+                        id INTEGER PRIMARY KEY,
+                        topic_id INTEGER NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        data BLOB NOT NULL
+                    )
+                """)       
     
-            # insert topics
-            self._cursors[k].execute("""
-                INSERT INTO topics (name, type, serialization_format, offered_qos_profiles)
-                VALUES (?, ?, ?, ?)
-            """, (k, self.topics[k], "cdr", ""))
-            self._last_rowid[k] = self._cursors[k].lastrowid
-            self._conns[k].commit()
-            print(f"[INIT_DB]: Initialized: {self._db_relpaths[k]} | topic_id={self.topics[k]}")
+                # insert topics
+                cur = conn.execute("""
+                    INSERT INTO topics (name, type, serialization_format, offered_qos_profiles)
+                    VALUES (?, ?, ?, ?)
+                """, (k, self.topics[k], "cdr", ""))
+                self._last_rowid[k] = cur.lastrowid
+                print(f"[INIT_DB]: Initialized: {self._db_relpaths[k]} | topic_id={self.topics[k]}")
 
     def _write_metadata(self, piece: Piece):
         """
         Write skeleton rows for vertices and edges using topology from top_vertices/top_edges.
         data is NULL until the real piece arrives.
         """
+        s = time.time()
         rowids = {'vertices':[], 'edges':[]}
         # populate ROS2 messages with topology information    
-        for v in piece.top_vertices:
-            m_v = Vertex(id=v.vertex_id)
-            s_v = serialize_message(m_v)
-            self._cursors['vertices'].execute("""
-                INSERT INTO messages (topic_id, timestamp, data)
-                VALUES (?, ?, ?)
-            """, (self._last_rowid['vertices'], -1, s_v)) # timestamp is -1 default
-            rowids['vertices'].append(self._cursors['vertices'].lastrowid)
+        with self._open('vertices') as conn:
+            for v in piece.top_vertices:
+                m_v = Vertex(id=v.vertex_id)
+                s_v = serialize_message(m_v)
+                cur = conn.execute("""
+                        INSERT INTO messages (topic_id, timestamp, data)
+                        VALUES (?, ?, ?)
+                    """, (self._last_rowid['vertices'], -1, s_v)) # timestamp is -1 default
+                rowids['vertices'].append(cur.lastrowid)
 
-        for e in piece.top_edges:
-            tf = LieGroupTransform(xi = e.xi, cov_set=False)
-            edge_mode = EdgeMode()
-            edge_mode.mode = EdgeMode.UNKNOWN
-            m_e = Edge(type=EdgeType(), mode=edge_mode, from_id=e.from_id, to_id=e.to_id, t_to_from=tf)
-            s_e = serialize_message(m_e)
-            self._cursors['edges'].execute("""
-                INSERT INTO messages (topic_id, timestamp, data)
-                VALUES (?, ?, ?)
-            """, (self._last_rowid['edges'], -1, s_e)) # timestamp is -1 default
-            rowids['edges'].append(self._cursors['edges'].lastrowid)
+        with self._open('edges') as conn:
+            conn.execute("BEGIN;")
+            for e in piece.top_edges:
+                tf = LieGroupTransform(xi = e.xi, cov_set=False)
+                edge_mode = EdgeMode()
+                edge_mode.mode = EdgeMode.UNKNOWN
+                m_e = Edge(type=EdgeType(), mode=edge_mode, from_id=e.from_id, to_id=e.to_id, t_to_from=tf)
+                s_e = serialize_message(m_e)
+                cur = conn.execute("""
+                    INSERT INTO messages (topic_id, timestamp, data)
+                    VALUES (?, ?, ?)
+                """, (self._last_rowid['edges'], -1, s_e)) # timestamp is -1 default
+                rowids['edges'].append(cur.lastrowid)
+            
+            conn.execute("COMMIT;")
 
-        self._conns['vertices'].commit()
-        self._conns['edges'].commit()
         piece.skeleton_rowids = rowids
+        print(f"_write_metadata: {time.time() - s}")
+
 
     def _write_message(self, piece: Piece):
         """
         Connect to existing conns and write messages
         """
+        s = time.time()
         print("[WRITE]")
         field_map = {
             'index':       'vtr_index',
             'pointmap_v0': 'pointmap',
         }
         skeleton_keys = {'vertices', 'edges'}
-        for k in self._cursors:
+        for k in self._db_relpaths:
             if k == 'index' and self._index_written:
                 continue
             
@@ -308,27 +322,30 @@ class LiveReconstructor:
             if df is None or df.empty:
                 print(f"[WRITE] Skipping '{k}': no data")
                 continue
-
-            if k in skeleton_keys and piece.skeleton_rowids.get(k):
-                # Fill in the NULL skeletons in order
-                for rowid, (_, row) in zip(piece.skeleton_rowids[k], df.iterrows()):
-                    self._cursors[k].execute("""
-                    UPDATE messages SET data = ?, timestamp = ?
-                    WHERE id = ?
-                """, (row['data'], int(row['timestamp']), rowid))
-            else:                                             
-                self._cursors[k].executemany("""
-                    INSERT INTO messages (topic_id, timestamp, data)
-                    VALUES (?, ?, ?)
-                """,  [
-                    (self._last_rowid[k], int(row['timestamp']), row['data'])
-                    for _, row in df.iterrows()
-                ])
             
-            self._conns[k].commit()
+            with self._open(k) as conn:
+                conn.execute("BEGIN;")
+                if k in skeleton_keys and piece.skeleton_rowids.get(k):
+                    # Fill in the NULL skeletons in order
+                    for rowid, (_, row) in zip(piece.skeleton_rowids[k], df.iterrows()):
+                        conn.execute("""
+                        UPDATE messages SET data = ?, timestamp = ?
+                        WHERE id = ?
+                    """, (row['data'], int(row['timestamp']), rowid))
+                else:                                             
+                    conn.executemany("""
+                        INSERT INTO messages (topic_id, timestamp, data)
+                        VALUES (?, ?, ?)
+                    """,  [
+                        (self._last_rowid[k], int(row['timestamp']), row['data'])
+                        for _, row in df.iterrows()
+                    ])
+                
+                conn.execute("COMMIT;")
 
             if k == 'index':
                 self._index_written = True
+            print(f"_write_message: {time.time() - s}")
 
     # ============= DEBUG ==================
     def _plot_preview(self):
@@ -337,11 +354,7 @@ class LiveReconstructor:
 
     # ============= CLEANUP ================
     def _close(self):
-        for k, conn in self._conns.items():
-            if conn:
-                conn.commit()
-                conn.close()
-                self._conns[k] = None
+        # nothing to flush, each write closes its own connections
         print("[LiveReconstructor] connections closed.")
 
 # +++++++++++++ HELPERS ++++++++++++++++
