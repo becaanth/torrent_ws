@@ -7,3 +7,5 @@ libtorrent/*
 scripts/torrent/*.json
 *.torrent
 *.pyc
+scripts/posegraph/__pycache__
+scripts/torrent/__pycache__
