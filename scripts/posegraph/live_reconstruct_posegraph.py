@@ -160,8 +160,8 @@ class LiveReconstructor:
       
         # Write metadata skeletons for any piece not yet written
         for piece in self.pieces:
-            if not piece.skeleton_rowids:  # empty dict = not yet written
-                time.sleep(1.0) # ANTHONY - delay for dev
+            if not piece.metadata_written:  # empty dict = not yet written
+                # time.sleep(0.1) # ANTHONY - delay for dev
                 self._write_metadata(piece)
         
         # TODO: handle metadata files that update
@@ -217,7 +217,7 @@ class LiveReconstructor:
                 self.pieces[i].vtr_index = poll_data['vtr_index']
                 self.pieces[i].env_info = poll_data['env_info']
                 self._write_message(self.pieces[i])
-                self.pieces.pop(i)
+                self.pieces[i].metadata_written = True
 
     def _parse_metadata(self, metadata_file: str):
         pieces, idx = inspect_torrent(metadata_file)
@@ -290,7 +290,9 @@ class LiveReconstructor:
                 tf = LieGroupTransform(xi = e.xi, cov_set=False)
                 edge_mode = EdgeMode()
                 edge_mode.mode = EdgeMode.UNKNOWN
-                m_e = Edge(type=EdgeType(), mode=edge_mode, from_id=e.from_id, to_id=e.to_id, t_to_from=tf)
+                edge_type = EdgeType()
+                edge_type.type = EdgeType.TEMPORAL
+                m_e = Edge(type=edge_type, mode=edge_mode, from_id=e.from_id, to_id=e.to_id, t_to_from=tf)
                 s_e = serialize_message(m_e)
                 cur = conn.execute("""
                     INSERT INTO messages (topic_id, timestamp, data)
@@ -301,6 +303,7 @@ class LiveReconstructor:
             conn.execute("COMMIT;")
 
         piece.skeleton_rowids = rowids
+        piece.metadata_written = True
         print(f"_write_metadata: {time.time() - s}")
 
 
@@ -327,14 +330,27 @@ class LiveReconstructor:
             
             with self._open(k) as conn:
                 conn.execute("BEGIN;")
-                if k in skeleton_keys and piece.skeleton_rowids.get(k):
+                if k in skeleton_keys:
+                    rowids = piece.skeleton_rowids.get(k)
+                    if not rowids:
+                        print(f"[WRITE] ERROR: no skeleton rowids for {k} - skipping to avoid duplicates")
+                        conn.execute("ROLLBACK;")
+                        continue
+                    if len(rowids) != len(df):
+                        print(f"[WRITE] ERROR: skeleton/data length mismatch for '{k}': "
+                        f"{len(rowids)} skeleton rows vs {len(df)} data rows — skipping")
+                        conn.execute("ROLLBACK;")
+                        continue
                     # Fill in the NULL skeletons in order
-                    for rowid, (_, row) in zip(piece.skeleton_rowids[k], df.iterrows()):
-                        conn.execute("""
+                    conn.executemany("""
                         UPDATE messages SET data = ?, timestamp = ?
                         WHERE id = ?
-                    """, (row['data'], int(row['timestamp']), rowid))
-                else:                                             
+                        """, [
+                            (row['data'], int(row['timestamp']), rowid) 
+                            for rowid, (_, row) in zip(rowids, df.iterrows())
+                        ])
+                else:           
+                    # no skeleton exists                                  
                     conn.executemany("""
                         INSERT INTO messages (topic_id, timestamp, data)
                         VALUES (?, ?, ?)
