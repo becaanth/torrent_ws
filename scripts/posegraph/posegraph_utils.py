@@ -278,6 +278,8 @@ class Vertex:
 class Edge:
     from_id: int
     to_id: int
+    mode: int
+    type: int
     xi: Optional[np.ndarray] = None
     cov: Optional[np.ndarray] = None
 
@@ -336,7 +338,7 @@ def parse_chunk(db_path: str) -> tuple[list[Vertex], list[Edge]]:
                     continue
                 xi = np.array(msg.t_to_from.xi)
                 cov = np.array(msg.t_to_from.cov).reshape(6, 6)
-                edges.append(Edge(from_id=int(msg.from_id), to_id=int(msg.to_id), xi=xi)) # ignore cov, cov=cov))
+                edges.append(Edge(from_id=int(msg.from_id), to_id=int(msg.to_id), mode=int(msg.mode.mode), type=int(msg.type.type),  xi=xi)) # ignore cov, cov=cov))
             except Exception as exc:
                 print(f"[parse_chunk] edge deserialize error in {db_path}: {exc}")
     except Exception as exc:
@@ -358,6 +360,8 @@ def edge_to_dict(e: Edge) -> dict:
     return {
         "from": e.from_id,
         "to":   e.to_id,
+        "mode": e.mode,
+        "type": e.type,
         "xi":   e.xi.tolist()  if e.xi  is not None else None,
         # "cov":  e.cov.tolist() if e.cov is not None else None, ignore cov
     }

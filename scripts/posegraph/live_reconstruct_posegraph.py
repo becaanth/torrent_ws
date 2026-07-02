@@ -161,7 +161,7 @@ class LiveReconstructor:
         # Write metadata skeletons for any piece not yet written
         for piece in self.pieces:
             if not piece.metadata_written:  # empty dict = not yet written
-                # time.sleep(0.1) # ANTHONY - delay for dev
+                time.sleep(0.1) # ANTHONY - delay for dev
                 self._write_metadata(piece)
         
         # TODO: handle metadata files that update
@@ -275,6 +275,7 @@ class LiveReconstructor:
         rowids = {'vertices':[], 'edges':[]}
         # populate ROS2 messages with topology information    
         with self._open('vertices') as conn:
+            conn.execute("BEGIN;")
             for v in piece.top_vertices:
                 m_v = Vertex(id=v.vertex_id)
                 s_v = serialize_message(m_v)
@@ -284,14 +285,16 @@ class LiveReconstructor:
                     """, (self._last_rowid['vertices'], -1, s_v)) # timestamp is -1 default
                 rowids['vertices'].append(cur.lastrowid)
 
+            conn.execute("COMMIT;")
+            
         with self._open('edges') as conn:
             conn.execute("BEGIN;")
             for e in piece.top_edges:
                 tf = LieGroupTransform(xi = e.xi, cov_set=False)
                 edge_mode = EdgeMode()
-                edge_mode.mode = EdgeMode.UNKNOWN
+                edge_mode.mode = e.mode
                 edge_type = EdgeType()
-                edge_type.type = EdgeType.TEMPORAL
+                edge_type.type = e.type
                 m_e = Edge(type=edge_type, mode=edge_mode, from_id=e.from_id, to_id=e.to_id, t_to_from=tf)
                 s_e = serialize_message(m_e)
                 cur = conn.execute("""

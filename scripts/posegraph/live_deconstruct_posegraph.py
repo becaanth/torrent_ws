@@ -343,12 +343,12 @@ class LiveDeconstructor:
             conn = sqlite3.connect(db_path)
             if self._index_df is not None:
                 _drop_rowid(self._index_df).to_sql('vtr_index',  conn, if_exists='replace', index=False)
-            _drop_rowid(chunk_vtxs).to_sql(    'vertices',       conn, if_exists='replace', index=False)
-            _drop_rowid(chunk_edges).to_sql(   'edges',          conn, if_exists='replace', index=False)
-            _drop_rowid(chunk_env_info).to_sql( 'env_info',      conn, if_exists='replace', index=False)
+            _drop_rowid(chunk_vtxs).to_sql('vertices', conn, if_exists='replace', index=False)
+            _drop_rowid(chunk_edges).to_sql('edges', conn, if_exists='replace', index=False)
+            _drop_rowid(chunk_env_info).to_sql('env_info', conn, if_exists='replace', index=False)
             _drop_rowid(chunk_waypoints).to_sql('waypoint_name', conn, if_exists='replace', index=False)
-            _drop_rowid(chunk_submap).to_sql(   'pointmap',      conn, if_exists='replace', index=False)
-            _drop_rowid(chunk_submap_ptrs).to_sql('pointmap_ptr',conn, if_exists='replace', index=False)
+            _drop_rowid(chunk_submap).to_sql('pointmap', conn, if_exists='replace', index=False)
+            _drop_rowid(chunk_submap_ptrs).to_sql('pointmap_ptr', conn, if_exists='replace', index=False)
             conn.close()
 
             pad_file_to_exact_size(db_path, PIECE_SIZE)

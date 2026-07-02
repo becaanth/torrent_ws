@@ -77,6 +77,8 @@ def inspect_torrent(path):
                 edges.append(Edge(
                     from_id=raw_edge['from'],
                     to_id=raw_edge['to'],
+                    mode=raw_edge['mode'],
+                    type=raw_edge['type'],
                     xi=raw_edge['xi'],
                 ))
             pieces.append(Piece(top_vertices=vertices, top_edges=edges, metadata_written=False))
