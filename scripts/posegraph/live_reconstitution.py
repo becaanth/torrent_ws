@@ -161,7 +161,7 @@ class LiveReconstructor:
         # Write metadata skeletons for any piece not yet written
         for piece in self.pieces:
             if not piece.metadata_written:  # empty dict = not yet written
-                time.sleep(0.1) # ANTHONY - delay for dev
+                time.sleep(0.01) # ANTHONY - delay for dev
                 self._write_metadata(piece)
         
         # TODO: handle metadata files that update
@@ -180,6 +180,7 @@ class LiveReconstructor:
 
             poll_data = self._parse_piece(db_file)
             self._ingest_piece(poll_data)
+            time.sleep(0.1) # ANTHONY - delay for dev
 
             self.db_written.append(db_file)
 
@@ -292,7 +293,7 @@ class LiveReconstructor:
             for e in piece.top_edges:
                 tf = LieGroupTransform(xi = e.xi, cov_set=False)
                 edge_mode = EdgeMode()
-                edge_mode.mode = e.mode
+                edge_mode.mode = EdgeMode.UNKNOWN
                 edge_type = EdgeType()
                 edge_type.type = e.type
                 m_e = Edge(type=edge_type, mode=edge_mode, from_id=e.from_id, to_id=e.to_id, t_to_from=tf)
