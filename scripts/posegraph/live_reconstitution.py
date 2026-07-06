@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 import contextlib
 
-class LiveReconstructor:
+class Reconstitutor:
     """
     Maintains a persistent connection to all submap-wise .db3 pieces and polls for new files at a fixed rate
 
@@ -41,12 +41,11 @@ class LiveReconstructor:
         data/env_info/env_info_0.db3
     """
 
-    def __init__(self, deconstructed_path: str, metadata_path: str, output_dir: str, poll_hz: float = 1.0, robot_id: int = 0):
+    def __init__(self, deconstructed_path: str, metadata_path: str, output_dir: str, poll_hz: float = 1.0):
         self.deconstructed_path = deconstructed_path
         self.metadata_path = metadata_path
         self.output_dir = output_dir
         self.poll_hz = poll_hz
-        self.robot_id = robot_id
         os.makedirs(f'{output_dir}', exist_ok=True)
 
         # topics we are reading from
@@ -105,13 +104,13 @@ class LiveReconstructor:
 
     # ============= PUBLIC =================
     def run(self):
-        print(f"[LiveReconstructor] polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
+        print(f"[Reconstitutor] polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
         try:
             while True:
                 self._poll()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
-            print("\n[LiveReconstructor] stopped.")
+            print("\n[Reconstitutor] stopped.")
         finally:
             self._close()
 
@@ -161,15 +160,21 @@ class LiveReconstructor:
         # Write metadata skeletons for any piece not yet written
         for piece in self.pieces:
             if not piece.metadata_written:  # empty dict = not yet written
-                time.sleep(0.01) # ANTHONY - delay for dev
+                # time.sleep(0.01) # ANTHONY - delay for dev
                 self._write_metadata(piece)
         
         # TODO: handle metadata files that update
         # TODO: this will have to be live instead of written-to .torrents
-        self.db_files = sorted(
-            [f for f in os.listdir(self.deconstructed_path) if f.endswith('.db3')],
-            key=lambda x: int(x.split('.')[0], 16)
-        )
+        robot_subfolders = [f.path for f in os.scandir(self.deconstructed_path) if f.is_dir()]
+        db_files = []
+        for robot_subfolder in robot_subfolders:
+            db_files.extend(sorted(
+                [f for f in os.listdir(robot_subfolder) if f.endswith('.db3')],
+                key=lambda x: int(x.split('.')[0], 16)
+            ))
+
+        self.db_files = db_files
+
         if not self.db_files:
             return
         
@@ -180,7 +185,7 @@ class LiveReconstructor:
 
             poll_data = self._parse_piece(db_file)
             self._ingest_piece(poll_data)
-            time.sleep(0.1) # ANTHONY - delay for dev
+            # time.sleep(0.1) # ANTHONY - delay for dev
 
             self.db_written.append(db_file)
 
@@ -189,7 +194,9 @@ class LiveReconstructor:
         Read from a submap-wise .db3
         """
         poll_data = {}
-        conn = sqlite3.connect(os.path.join(self.deconstructed_path, db_file), isolation_level=None)
+        submap_id = int(db_file[:-4],16)
+        robot_id = extract_robot_id(submap_id)
+        conn = sqlite3.connect(os.path.join(f"{self.deconstructed_path}/{robot_id}", db_file), isolation_level=None)
 
         for table in self.tables:
             try:
@@ -401,7 +408,7 @@ class LiveReconstructor:
     # ============= CLEANUP ================
     def _close(self):
         # nothing to flush, each write closes its own connections
-        print("[LiveReconstructor] connections closed.")
+        print("[Reconstitutor] connections closed.")
 
 # +++++++++++++ HELPERS ++++++++++++++++
 def preview_piece(piece):
@@ -424,24 +431,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = 'Script to deconstruct posegraphs submap-wise')
     parser.add_argument('-b', '--bag_name', default='none', help="The name of the posegraph") # TODO: watch deconstructed dir generally
     parser.add_argument('-m', '--metadata', type=str, default='/home/asrl/ASRL/vtr3/torrent_ws/scripts/torrent/metadata', help="")
-    parser.add_argument('-r', '--robot_id', type=int, default=0, help="")
     parser.add_argument('--poll_hz', type=float, default=1.0)
     parser.add_argument('--posegraph_root', default='/home/asrl/ASRL/vtr3/temp/pgs')
     parser.add_argument('--piece_root', default='/home/asrl/ASRL/vtr3/temp/pcs')
     args = parser.parse_args()
     bag_name = args.bag_name
-    robot_id = args.robot_id
 
     output_dir = os.path.join(args.posegraph_root, f"r{bag_name}", 'graph')
     piece_path = os.path.join(args.piece_root, args.bag_name)
     metadata_path = args.metadata
 
     print(f'[MAIN]: output_dir: {output_dir}')
-    rec = LiveReconstructor(
+    rec = Reconstitutor(
         deconstructed_path=piece_path,
         metadata_path=metadata_path,
         output_dir=output_dir,
         poll_hz=args.poll_hz,
-        robot_id=robot_id
     )
     rec.run()

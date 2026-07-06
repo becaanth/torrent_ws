@@ -72,20 +72,11 @@ def _read_new_rows(conn: sqlite3.Connection, after_rowid: int) -> pd.DataFrame:
         conn,
     )
 
-
-def _deserialize_col(df: pd.DataFrame, col: str):
-    """Deserialize a single column of ROS messages, return list of msgs."""
-    return [
-        deserialize_message(row.data, get_message(row.topic_type))
-        for _, row in df.iterrows()
-    ]
-
-
 # ---------------------------------------------------------------------------
-# LiveDeconstructor
+# Deconstitutor
 # ---------------------------------------------------------------------------
 
-class LiveDeconstructor:
+class Deconstitutor:
     """
     Maintains persistent read connections to the 7 source .db3 files of a
     VTR3 posegraph and polls for new rows at a fixed rate.
@@ -100,12 +91,13 @@ class LiveDeconstructor:
         data/env_info/env_info_0.db3
     """
 
-    def __init__(self, bag_path: str, output_dir: str, poll_hz: float = 1.0):
+    def __init__(self, bag_path: str, output_dir: str, robot_id: str, poll_hz: float = 1.0):
         self.bag_path   = bag_path
+        self.robot_id = int(robot_id)
         self.output_dir = output_dir
         self.poll_hz    = poll_hz
 
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(self.output_dir, exist_ok=True)
 
         # --- source db3 relative paths ---------------------------------------
         self._db_relpaths = {
@@ -141,7 +133,7 @@ class LiveDeconstructor:
         # index df read lazily on first successful connection
         self._index_df: pd.DataFrame | None = None
 
-        print(f"[LiveDeconstructor] output: {output_dir}")
+        print(f"[Deconstitutor] output: {output_dir}")
 
     # ------------------------------------------------------------------
     # Public
@@ -155,17 +147,17 @@ class LiveDeconstructor:
         if not os.path.exists(full_path):
             return None
         self._conns[key] = sqlite3.connect(full_path, check_same_thread=False)
-        print(f"[LiveDeconstructor] opened {key}")
+        print(f"[Deconstitutor] opened {key}")
         return self._conns[key]
 
     def run(self):
-        print(f"[LiveDeconstructor] polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
+        print(f"[Deconstitutor] polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
         try:
             while True:
                 self._poll()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
-            print("\n[LiveDeconstructor] stopped.")
+            print("\n[Deconstitutor] stopped.")
         finally:
             self._close()
 
@@ -181,9 +173,9 @@ class LiveDeconstructor:
                 try:
                     self._index_df = _read_full_df(conn)
                     self._last_rowid['index'] = int(self._index_df['rowid'].max()) if len(self._index_df) else 0
-                    print(f"[LiveDeconstructor] index: {len(self._index_df)} rows")
+                    print(f"[Deconstitutor] index: {len(self._index_df)} rows")
                 except Exception as e:
-                    print(f"[LiveDeconstructor] index: not ready yet ({e})")
+                    print(f"[Deconstitutor] index: not ready yet ({e})")
 
         self._ingest_new_rows('vertices',      self._parse_vertices)
         self._ingest_new_rows('edges',         self._parse_edges)
@@ -192,7 +184,7 @@ class LiveDeconstructor:
         self._ingest_new_rows('waypoint_name', None)
         self._ingest_new_rows('env_info',      None)
 
-        self._write_new_chunks()
+        self._write_new_chunks(self.robot_id)
 
     def _ingest_new_rows(self, key: str, parse_fn):
         """
@@ -206,7 +198,7 @@ class LiveDeconstructor:
         try:
             new_rows = _read_new_rows(conn, self._last_rowid[key])
         except Exception as e:
-            print(f"[LiveDeconstructor] {key}: reconnecting ({e})")
+            print(f"[Deconstitutor] {key}: reconnecting ({e})")
             try:
                 self._conns[key].close()
             except Exception:
@@ -227,7 +219,7 @@ class LiveDeconstructor:
         if parse_fn is not None:
             parse_fn(new_rows)
 
-        print(f"[LiveDeconstructor] {key}: +{len(new_rows)} rows "
+        print(f"[Deconstitutor] {key}: +{len(new_rows)} rows "
               f"(total {len(self._df[key])})")
 
     # ------------------------------------------------------------------
@@ -261,29 +253,24 @@ class LiveDeconstructor:
     # Internal — chunk writing
     # ------------------------------------------------------------------
 
-    def _write_new_chunks(self):
+    def _write_new_chunks(self, robot_id):
         """
         For each submap not yet written, check if we have enough data
         to write its chunk and write it if so.
         """
-        # print(f"[_write_new_chunks] submap_ids={self._submap_ids}  "
-        #       f"map_vids={self._map_vids}  "
-        #       f"vertex_ids={self._vertex_ids[:8]}...  "
-        #       f"from_ids={self._from_ids[:8]}...  "
-        #       f"written={self._written_chunks}  "
-        #       f"rows: vtx={len(self._df['vertices'])} "
-        #       f"edge={len(self._df['edges'])} "
-        #       f"pm={len(self._df['pointmap'])} "
-        #       f"ptr={len(self._df['pointmap_ptr'])} "
-        #       f"wp={len(self._df['waypoint_name'])} "
-        #       f"env={len(self._df['env_info'])}")
-
         for i, sid in enumerate(self._submap_ids[:-1]):
             if i in self._written_chunks:
                 continue
 
             sid = int(sid)
             print(f"  [chunk {i}] sid={sid}")
+
+            # only write chunks originated by this robot; other pieces will have come from torrent
+            originator_id = extract_robot_id(sid)
+            if (originator_id != robot_id):
+                print(f"   [chunk {i}] robot id {robot_id} does not match submap originator id {originator_id}")
+                self._written_chunks.add(i)
+                continue
 
             # Rows in pointmap_ptr that belong to this submap
             ptr_row_idxs = np.where(self._map_vids == sid)[0]
@@ -353,7 +340,7 @@ class LiveDeconstructor:
 
             pad_file_to_exact_size(db_path, PIECE_SIZE)
             self._written_chunks.add(i)
-            print(f"[LiveDeconstructor] wrote chunk {str(hex(int(sid)))[2:].zfill(16)}.db3  (submap vertex_id={sid})")
+            print(f"[Deconstitutor] wrote chunk {str(hex(int(sid)))[2:].zfill(16)}.db3  (submap vertex_id={sid})")
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -363,7 +350,7 @@ class LiveDeconstructor:
         for conn in self._conns.values():
             if conn is not None:
                 conn.close()
-        print("[LiveDeconstructor] connections closed.")
+        print("[Deconstitutor] connections closed.")
 
 
 # ---------------------------------------------------------------------------
@@ -379,12 +366,15 @@ if __name__ == "__main__":
     parser.add_argument('--piece_root', default='/home/asrl/ASRL/vtr3/temp/pcs')
     args = parser.parse_args()
 
+    robot_id = os.getenv("ROBOT_ID")
     bag_path   = os.path.join(args.posegraph_root, args.bag_name, 'graph')
-    output_dir = os.path.join(args.piece_root, args.bag_name)
+    output_dir = os.path.join(args.piece_root, args.bag_name, robot_id)
+    print(f"ROBOT_ID : {robot_id}")
 
-    dec = LiveDeconstructor(
+    dec = Deconstitutor(
         bag_path=bag_path,
         output_dir=output_dir,
+        robot_id=robot_id,
         poll_hz=args.poll_hz,
     )
     dec.run()
