@@ -3,7 +3,6 @@ import libtorrent as lt
 import time
 import zenoh
 import msgpack
-import threading
 import json
 from queue import Queue
 import os
@@ -12,7 +11,7 @@ import pdb
 try:
     if os.path.exists('scripts/torrent/peer_params.json'):
         with open('scripts/torrent/peer_params.json', "r") as f:
-            params =  json.load(f)
+            params = json.load(f)
 except:
     print("can't open params, navigate to torrent_ws")
 
@@ -25,20 +24,32 @@ ROBOT_IPS = {
 
 # Anthonys laptop
 DOCKER_IPS = {
-    'torrent':'172.18.0.3',
-    'torrent1':'172.18.0.4'
+    'torrent':'172.18.0.2',
+    'torrent1':'172.18.0.3'
 }
+
+peers = []
+port = 6881
+
 
 if params['device'] == 'docker':
     TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
     MY_IP = DOCKER_IPS[params['robot_id']]
+    for key in DOCKER_IPS.keys():
+        if key != params['robot_id']:
+            peers.append((DOCKER_IPS[key], port))
+
 elif params['device'] == 'hunter':
     TORRENT_WS = "/home/indro/ASRL/vtr3/torrent_ws"
     MY_IP = ROBOT_IPS[params['robot_id']]
+    for key in ROBOT_IPS.keys():
+        if key != params['robot_id']:
+            peers.append((ROBOT_IPS[key], port))
 else:
     print('bad params')
 
-PATH = f"{TORRENT_WS}/deconstructed/1/{params['posegraph']}"
+robot_id = 0
+PATH = f"/home/asrl/ASRL/vtr3/temp/torrent_pcs/{params['posegraph']}/"
 STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
 
 message_queue = Queue()
@@ -54,7 +65,7 @@ def on_mutable_item(sample, mutable_item):
     mutable_item['pubkey'] = zenoh_item.get('pubkey')
     mutable_item['infohash'] = zenoh_item.get('infohash')
     mutable_item['seq'] = zenoh_item.get('seq')
-    mutable_item['ip'] = zenoh_item.get('ip')
+    mutable_item['my_ip'] = zenoh_item.get('my_ip')
 
     return mutable_item
 
@@ -85,14 +96,7 @@ if __name__ == "__main__":
     })
     print(f'initiating torrent session took {time.time() - start}')
 
-
-    peers = []
-    port = 6881
-    for key in ROBOT_IPS.keys():
-        if key != params['robot_id']:
-            peers.append((ROBOT_IPS[key], port))
-
-    old_infohash = mutable_item['infohash']
+    old_seq = mutable_item['seq']
 
     # Configure Zenoh
     start=time.time()
@@ -125,23 +129,25 @@ if __name__ == "__main__":
                 sample = message_queue.get()
                 
                 mutable_item = on_mutable_item(sample, mutable_item)
-                print(f"[zenoh]: new mutable item") #: \n{mutable_to_string(mutable_item)}")
+                print(f"[zenoh]: new mutable item: \n{mutable_to_string(mutable_item)}")
                 
                 # i.e. if new infohash
-                if mutable_item['infohash'] != old_infohash: 
-                    print(f"[torrent]: adding {mutable_item['infohash']}")
+                if mutable_item['seq'] > old_seq: 
+                    print(f"[torrent]: adding \n\t infohash : {mutable_item['infohash']} \n\t save_path : {PATH} \n\t peers : {peers}")
                     for handle in ses.get_torrents():
                         ses.remove_torrent(handle)
-                    
+
                     h = ses.add_torrent({
                         'info_hash': mutable_item['infohash'],
                         'save_path': PATH,
-                        'peers': peers
                     })
-                    
+                    print(f"attempting connect_peer to {peers}")
+                    for ip, p in peers:
+                        h.connect_peer((ip, p))
+
                     s = h.status()
-                    # print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
-                    old_infohash = mutable_item['infohash'] # dont duplicate torrent handles
+                    print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
+                    old_seq = mutable_item['seq'] # dont duplicate torrent handles
 
             # Monitor existing torrents
             for handle in ses.get_torrents():
@@ -151,7 +157,9 @@ if __name__ == "__main__":
                     transfer_start = time.time()
                 if s.progress == 1.0:
                     print(f"completed torrent in {time.time() - transfer_start} s")
-            
+                # for a in ses.pop_alerts():
+                #     print(f"[alert] {a}")
+                        
             time.sleep(1)
 
     except KeyboardInterrupt:

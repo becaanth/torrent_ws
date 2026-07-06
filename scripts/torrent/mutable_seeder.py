@@ -32,8 +32,8 @@ ROBOT_IPS = {
 
 # Anthonys laptop
 DOCKER_IPS = {
-    'torrent':'172.18.0.3',
-    'torrent1':'172.18.0.4'
+    'torrent':'172.18.0.2',
+    'torrent1':'172.18.0.3'
 }
 
 # -------------------------
@@ -87,13 +87,13 @@ def create_snapshot(input_path, output_path, posegraph):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = 'Seed mutable torrents')
     parser.add_argument('-p', '--posegraph', type=str, default=None, help="Name of posegraph") 
-    parser.add_argument('-a', '--agent_num', type=int, default=0, help="")
+    parser.add_argument('-r', '--robot_id', type=int, default=0, help="")
     parser.add_argument('-d', '--device', type=str, default='docker', help="running in \'docker\' or \'hunter\'")
     parser.add_argument('-s', '--seeder', type=str, default='seeder_params.json', help="path to seeder params")
     args = parser.parse_args()
 
     posegraph = args.posegraph
-    agent = args.agent_num
+    robot_id = args.robot_id
     device = args.device
     seeder_params = args.seeder
 
@@ -116,7 +116,7 @@ if __name__ == "__main__":
         print('bad params/device')
 
     # File setup
-    input_path = f"{os.getenv('VTRTEMP')}/pcs/{params['posegraph']}"
+    input_path = f"{os.getenv('VTRTEMP')}/pcs/{params['posegraph']}/{robot_id}"
     output_path = f"{torrent_ws}/scripts/torrent/metadata"
     state_file = f"{torrent_ws}/scripts/torrent/mutable_state.json"
 

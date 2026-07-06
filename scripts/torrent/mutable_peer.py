@@ -3,18 +3,14 @@ import libtorrent as lt
 import sys
 import pdb
 
-# -----------------------------
-# CONFIG (these are shared OOB)
-# -----------------------------
+# CONFIG
 PUBKEY = b'1\x02\x0b\xa2\xc0\x9c\xc1\xc2\xdb\xeb@\xb1\xa9\xcb\xf19\xdc\x8c\x8a\xc0\x92G\xa8\xcan\xc4\x11\x19\x07\xf8\xec\x06'
 SALT   = b'submaps'
 SAVE_PATH = "/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/2/test_indoors"
 SEEDER_IP = "172.18.0.2"
 SEEDER_PORT = 6881
 
-# -----------------------------
 # Session setup
-# -----------------------------
 ses = lt.session({
     "listen_interfaces": "172.18.0.3:6881,[::]:6881",
     "enable_dht": True,
