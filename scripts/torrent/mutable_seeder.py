@@ -21,7 +21,7 @@ ROBOT_IPS = {
     'prof_plum':'192.168.3.42',
     'col_mustard':'192.168.4.42',
     'mrs_peacock':'192.168.5.42' 
-    }
+}
 
 # Anthonys laptop
 DOCKER_IPS = {

@@ -2,7 +2,6 @@
 import libtorrent as lt
 import time
 import zenoh
-import msgpack
 from queue import Queue
 import os
 import argparse
@@ -16,7 +15,7 @@ ROBOT_IPS = {
     'prof_plum':'192.168.3.42',
     'col_mustard':'192.168.4.42',
     'mrs_peacock':'192.168.5.42' 
-    }
+}
 
 # Anthonys laptop
 DOCKER_IPS = {
@@ -28,7 +27,7 @@ class MutablePeer:
     """
     Listen to Zenoh gossip, join a torrent session
     """
-    def __init__(self, params : dict, state : dict):
+    def __init__(self, params : dict, state : dict, poll_hz : float = 0.5):
         # robot params
         self.container = params['container']
         self.peers = []
@@ -71,6 +70,7 @@ class MutablePeer:
         self.seq = self.mi['seq'] # sequence number
 
         # etc
+        self.poll_hz = poll_hz
 
     def unpack_device(self, params : dict):
         """
@@ -106,6 +106,7 @@ class MutablePeer:
         try:
             while True:
                 self._flush_queue()
+                time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
             print("\n[peer] stopped")
         finally:
@@ -121,6 +122,10 @@ class MutablePeer:
             
             self.mi = on_mutable_item(sample)
             print(f"[zenoh]: new mutable item: \n{mutable_to_string(self.mi)}")
+
+            if self.mi['my_ip'] == self.my_ip:
+                print(f"[flush]: skipping. don't leech own pieces")
+                return
             
             # i.e. if new infohash
             if self.mi['seq'] > self.seq: 
@@ -146,9 +151,7 @@ class MutablePeer:
             print(f"[{handle.info_hash()}] Progress: {s.progress*100:.1f}%")
             # for a in ses.pop_alerts():
             #     print(f"[alert] {a}")
-                    
-        time.sleep(2)
-
+                
     def on_sample(self, sample):
         print('Received Zenoh message')
         self.message_queue.put(sample)
@@ -160,7 +163,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Mutable Peer (LibTorrent + Zenoh)")
     parser.add_argument('-s', '--peer_params', type=str, default = 'peer_params.json')
     parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
+    parser.add_argument('--poll_hz', type=float, default = 0.25)
     args = parser.parse_args()
+    robot_id = os.getenv("ROBOT_ID")
 
     with open(f'torrent/{args.peer_params}', "r") as f:
                 params = json.load(f)
@@ -170,6 +175,7 @@ if __name__ == "__main__":
 
     mutable_peer = MutablePeer(
         params=params,
-        state=state
+        state=state,
+        poll_hz=args.poll_hz
     )
     mutable_peer.run()

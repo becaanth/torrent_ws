@@ -17,4 +17,4 @@ windows:
           - source $VTRSRC/main/install/setup.bash
           - cd $VTRROOT/torrent_ws/scripts
           - rm -r $VTRTEMP/pgs/rutias
-          - python3 posegraph/live_reconstitution.py -b utias --piece_root /home/asrl/ASRL/vtr3/temp/torrent_pcs
+          - python3 posegraph/live_reconstitution.py -p utias --piece_root /home/asrl/ASRL/vtr3/temp/torrent_pcs

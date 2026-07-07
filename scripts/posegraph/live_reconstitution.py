@@ -25,7 +25,7 @@ class Reconstitutor:
     """
     Maintains a persistent connection to all submap-wise .db3 pieces and polls for new files at a fixed rate
 
-    Source layout (relative to deconstructed_path):
+    Source layout (relative to pieces_path):
         {UUID}00000.db3
         {UUID}00001.db3
         {UUID}00002.db3
@@ -41,8 +41,8 @@ class Reconstitutor:
         data/env_info/env_info_0.db3
     """
 
-    def __init__(self, deconstructed_path: str, metadata_path: str, output_dir: str, poll_hz: float = 1.0):
-        self.deconstructed_path = deconstructed_path
+    def __init__(self, pieces_path: str, metadata_path: str, output_dir: str, poll_hz: float = 1.0):
+        self.pieces_path = pieces_path
         self.metadata_path = metadata_path
         self.output_dir = output_dir
         self.poll_hz = poll_hz
@@ -165,7 +165,7 @@ class Reconstitutor:
         
         # TODO: handle metadata files that update
         # TODO: this will have to be live instead of written-to .torrents
-        robot_subfolders = [f.path for f in os.scandir(self.deconstructed_path) if f.is_dir()]
+        robot_subfolders = [f.path for f in os.scandir(self.pieces_path) if f.is_dir()]
         db_files = []
         for robot_subfolder in robot_subfolders:
             db_files.extend(sorted(
@@ -183,11 +183,14 @@ class Reconstitutor:
             if db_file in self.db_written:
                 continue
 
-            poll_data = self._parse_piece(db_file)
-            self._ingest_piece(poll_data)
-            # time.sleep(0.1) # ANTHONY - delay for dev
-
-            self.db_written.append(db_file)
+            try:
+                poll_data = self._parse_piece(db_file)
+                self._ingest_piece(poll_data)
+                # time.sleep(0.1) # ANTHONY - delay for dev
+                self.db_written.append(db_file)
+            except:
+                print(f"Warning: Could not read from {db_file}")
+                continue
 
     def _parse_piece(self, db_file: pd.DataFrame):
         """
@@ -196,7 +199,7 @@ class Reconstitutor:
         poll_data = {}
         submap_id = int(db_file[:-4],16)
         robot_id = extract_robot_id(submap_id)
-        conn = sqlite3.connect(os.path.join(f"{self.deconstructed_path}/{robot_id}", db_file), isolation_level=None)
+        conn = sqlite3.connect(os.path.join(f"{self.pieces_path}/{robot_id}", db_file), isolation_level=None)
 
         for table in self.tables:
             try:
@@ -429,21 +432,21 @@ def preview_piece(piece):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = 'Script to deconstruct posegraphs submap-wise')
-    parser.add_argument('-b', '--bag_name', default='none', help="The name of the posegraph") # TODO: watch deconstructed dir generally
+    parser.add_argument('-p', '--posegraph', default='none', help="The name of the posegraph") # TODO: watch deconstructed dir generally
     parser.add_argument('-m', '--metadata', type=str, default='/home/asrl/ASRL/vtr3/torrent_ws/scripts/torrent/metadata', help="")
     parser.add_argument('--poll_hz', type=float, default=1.0)
     parser.add_argument('--posegraph_root', default='/home/asrl/ASRL/vtr3/temp/pgs')
     parser.add_argument('--piece_root', default='/home/asrl/ASRL/vtr3/temp/pcs')
     args = parser.parse_args()
-    bag_name = args.bag_name
+    posegraph = args.posegraph
 
-    output_dir = os.path.join(args.posegraph_root, f"r{bag_name}", 'graph')
-    piece_path = os.path.join(args.piece_root, args.bag_name)
+    output_dir = os.path.join(args.posegraph_root, f"r{posegraph}", 'graph')
+    piece_path = os.path.join(args.piece_root, args.posegraph)
     metadata_path = args.metadata
 
     print(f'[MAIN]: output_dir: {output_dir}')
     rec = Reconstitutor(
-        deconstructed_path=piece_path,
+        pieces_path=piece_path,
         metadata_path=metadata_path,
         output_dir=output_dir,
         poll_hz=args.poll_hz,

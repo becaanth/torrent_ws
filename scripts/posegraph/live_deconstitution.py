@@ -81,7 +81,7 @@ class Deconstitutor:
     Maintains persistent read connections to the 7 source .db3 files of a
     VTR3 posegraph and polls for new rows at a fixed rate.
 
-    Source layout (relative to bag_path):
+    Source layout (relative to posegraph):
         vertices/vertices_0.db3
         edges/edges_0.db3
         index/index_0.db3
@@ -91,8 +91,8 @@ class Deconstitutor:
         data/env_info/env_info_0.db3
     """
 
-    def __init__(self, bag_path: str, output_dir: str, robot_id: str, poll_hz: float = 1.0):
-        self.bag_path   = bag_path
+    def __init__(self, input_dir: str, output_dir: str, robot_id: str, poll_hz: float = 1.0):
+        self.input_dir   = input_dir
         self.robot_id = int(robot_id)
         self.output_dir = output_dir
         self.poll_hz    = poll_hz
@@ -143,7 +143,7 @@ class Deconstitutor:
         """Return an open connection for key, opening it lazily if the file exists."""
         if self._conns[key] is not None:
             return self._conns[key]
-        full_path = os.path.join(self.bag_path, self._db_relpaths[key])
+        full_path = os.path.join(self.input_dir, self._db_relpaths[key])
         if not os.path.exists(full_path):
             return None
         self._conns[key] = sqlite3.connect(full_path, check_same_thread=False)
@@ -359,20 +359,19 @@ class Deconstitutor:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Live posegraph deconstructor")
-    parser.add_argument('-b', '--bag_name', required=True,help="Bag name (subdirectory under folder_path)")
-    parser.add_argument('--agent', type=int, default=0)
+    parser.add_argument('-p', '--posegraph', required=True,help="posegraph name (subdirectory under folder_path)")
+    parser.add_argument('--posegraph_root', default=f'{os.getenv("VTRTEMP")}/pgs')
+    parser.add_argument('--piece_root', default=f'{os.getenv("VTRTEMP")}/pcs')
     parser.add_argument('--poll_hz', type=float, default=1.0)
-    parser.add_argument('--posegraph_root', default='/home/asrl/ASRL/vtr3/temp/pgs')
-    parser.add_argument('--piece_root', default='/home/asrl/ASRL/vtr3/temp/pcs')
     args = parser.parse_args()
 
     robot_id = os.getenv("ROBOT_ID")
-    bag_path   = os.path.join(args.posegraph_root, args.bag_name, 'graph')
-    output_dir = os.path.join(args.piece_root, args.bag_name, robot_id)
+    input_dir   = os.path.join(args.posegraph_root, args.posegraph, 'graph')
+    output_dir = os.path.join(args.piece_root, args.posegraph, robot_id)
     print(f"ROBOT_ID : {robot_id}")
 
     dec = Deconstitutor(
-        bag_path=bag_path,
+        input_dir=input_dir,
         output_dir=output_dir,
         robot_id=robot_id,
         poll_hz=args.poll_hz,
