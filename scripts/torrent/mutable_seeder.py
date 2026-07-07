@@ -6,18 +6,10 @@ import zenoh
 import os
 import json
 import msgpack
-import numpy as np
 import argparse
 
-import sqlite3
-import pandas as pd
-from rclpy.serialization import deserialize_message, serialize_message
-from rosidl_runtime_py.utilities import get_message
 from posegraph.posegraph_utils import *
 from torrent_utils import *
-
-from dataclasses import dataclass, field
-from typing import Optional
 
 import pdb
 
@@ -44,7 +36,7 @@ class MutableSeeder:
     1) update Zenoh discovery messages and broadcast
     2) seed the immutable snapshots
     """
-    def __init__(self, params : dict, robot_id : int, state : str, poll_hz : float):
+    def __init__(self, params : dict, robot_id : int, state : dict, poll_hz : float):
         # robot params
         self.container = params['container']
         self.my_ip, z_cfg = self.unpack_device(params)
@@ -54,6 +46,7 @@ class MutableSeeder:
         self.posegraph = params['posegraph']
         self.robot_id = robot_id
         self.state = state
+
         # file system
         self.input_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}/{self.robot_id}"
         self.metadata_path = "scripts/torrent/metadata"
@@ -114,13 +107,13 @@ class MutableSeeder:
         """
         run the main loop
         """
-        print(f"[Seeder] polling at {self.poll_hz} Hz (Ctrl-C to stop)")
+        print(f"[seeder] polling at {self.poll_hz} Hz (Ctrl-C to stop)")
         try: 
             while True:
                 self._poll()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
-            print("\n[Seeder] stopped.")
+            print("\n[seeder] stopped.")
         finally:
             self.z_ses.close()
 
@@ -156,13 +149,15 @@ class MutableSeeder:
         """
         Generate new .torrent for a directory
         """
+        print(f"[snapshot] input path : {self.input_path}")
         fs = lt.file_storage()
-        lt.add_files(fs, self.input_path)
+        lt.add_files(fs, self.input_path, sqlite_file_filter) # filter removes -journal, -wal extensions
 
         t = lt.create_torrent(fs)
         
         PIECE_SIZE = 2 * 1024 * 1024 # padding
         t.piece_size(PIECE_SIZE)
+
         lt.set_piece_hashes(t, os.path.dirname(self.input_path))
         torrent_dict = t.generate()
         wrote_idx = False
@@ -198,7 +193,6 @@ class MutableSeeder:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Mutable Seeder (LibTorrent + Zenoh)")
-    parser.add_argument('-p', '--posegraph', type=str, required = True, help = "pose_graph name")
     parser.add_argument('-s', '--seeder_params', type=str, default = 'seeder_params.json')
     parser.add_argument('-r', '--robot_id', type=int, default = 0)
     parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
