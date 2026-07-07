@@ -125,6 +125,9 @@ class MutableSeeder:
             self.z_ses.close()
 
     def _poll(self):
+        if len(os.listdir(self.input_path)) == 0:
+            return
+
         if has_new_file(self.input_path) or self.start_flag == False:
             self.start_flag = True
 
