@@ -1,122 +1,167 @@
-import time
+#!/usr/bin/env python3
 import libtorrent as lt
-import sys
+import time
+import zenoh
+import msgpack
+import json
+from queue import Queue
+import os
 import pdb
 
-# CONFIG
-PUBKEY = b'1\x02\x0b\xa2\xc0\x9c\xc1\xc2\xdb\xeb@\xb1\xa9\xcb\xf19\xdc\x8c\x8a\xc0\x92G\xa8\xcan\xc4\x11\x19\x07\xf8\xec\x06'
-SALT   = b'submaps'
-SAVE_PATH = "/home/asrl/ASRL/vtr3/torrent_ws/deconstructed/2/test_indoors"
-SEEDER_IP = "172.18.0.2"
-SEEDER_PORT = 6881
+try:
+    if os.path.exists('scripts/torrent/peer_params.json'):
+        with open('scripts/torrent/peer_params.json', "r") as f:
+            params = json.load(f)
+except:
+    print("can't open params, navigate to torrent_ws")
 
-# Session setup
-ses = lt.session({
-    "listen_interfaces": "172.18.0.3:6881,[::]:6881",
-    "enable_dht": True,
-    "dht_bootstrap_nodes": "router.bittorrent.com:6881,dht.transmissionbt.com:6881,router.utorrent.com:6881",    "alert_mask": (
-        lt.alert.category_t.all_categories
-    ),
-})
+ROBOT_IPS = {
+    'mr_green':'192.168.2.42',
+    'prof_plum':'192.168.3.42',
+    'col_mustard':'192.168.4.42',
+    'mrs_peacock':'192.168.5.42' 
+    }
 
-print("Bootstrapping DHT")
-print(f"Adding seeder as DHT node: {SEEDER_IP}:{SEEDER_PORT}")
-ses.add_dht_node(("router.bittorrent.com", 6881))
-ses.add_dht_node(("dht.transmissionbt.com", 6881))
-ses.add_dht_node(("router.utorrent.com", 6881))
-ses.add_dht_node((SEEDER_IP, SEEDER_PORT))
+# Anthonys laptop
+DOCKER_IPS = {
+    'torrent':'172.18.0.2',
+    'torrent1':'172.18.0.3'
+}
 
-# Give DHT time to establish connection with seeder
-print("Waiting for DHT to connect to seeder...")
-time.sleep(5)
-    
-print(f"Requesting mutable item pk: {PUBKEY.hex()}, salt: {SALT}")
-ses.dht_get_mutable_item(PUBKEY, SALT)
+peers = []
+port = 6881
 
-torrent_added = False
-handle = None
+if params['device'] == 'docker':
+    TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
+    MY_IP = DOCKER_IPS[params['robot_id']]
+    for key in DOCKER_IPS.keys():
+        if key != params['robot_id']:
+            peers.append((DOCKER_IPS[key], port))
 
-# -----------------------------
-# Event loop
-# -----------------------------
-while True:
-    alerts = ses.pop_alerts()
+elif params['device'] == 'hunter':
+    TORRENT_WS = "/home/indro/ASRL/vtr3/torrent_ws"
+    MY_IP = ROBOT_IPS[params['robot_id']]
+    for key in ROBOT_IPS.keys():
+        if key != params['robot_id']:
+            peers.append((ROBOT_IPS[key], port))
+else:
+    print('bad params')
 
-    for a in alerts:
-        alert_type = type(a).__name__
-        print(f"[{alert_type}] {a}")
-        print(f"[ALERT] {alert_type}: {a}", flush=True)  # Force flush
-        sys.stdout.flush()  # Extra flush
-        
-        # ---- Mutable item resolved ----
-        if alert_type == 'dht_mutable_item_alert':
-            print("=== ENTERING MUTABLE ITEM HANDLER ===", flush=True)
-            sys.stdout.flush()
-            alert = a
-            key = a.key
-            salt = a.salt
-            seq = a.seq
-            sig = a.signature
-            print(f'[MESSAGE] {a.message()}')
-            print(f"--- DHT Mutable Item Received ---")
-            print(f"Key: {key.hex()}")  # Check if this is a dict or bytes
-            print(f"Sequence: {seq}")
-            print(f"Salt: {salt}")
+robot_id = 0
+PATH = f"/home/asrl/ASRL/vtr3/temp/torrent_pcs/{params['posegraph']}/"
+STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
 
-            target_infohash = None
+message_queue = Queue()
 
-            # Try to get the value by calling to_string on item
-            try:
-                # entry objects sometimes have to_string() or to_dict()
-                item_str = a.item.to_string()
-                print(f"Item string: {item_str}")
-                decoded = lt.bdecode(item_str)
-                print(f"Decoded: {decoded}")
+def on_sample(sample):
+    print('Received Zenoh message')
+    message_queue.put(sample)
+
+def on_mutable_item(sample, mutable_item):
+    # Decode payload, update mutable_item
+    zenoh_item = msgpack.unpackb(bytes(sample.payload), raw=False)
+
+    mutable_item['pubkey'] = zenoh_item.get('pubkey')
+    mutable_item['infohash'] = zenoh_item.get('infohash')
+    mutable_item['seq'] = zenoh_item.get('seq')
+    mutable_item['my_ip'] = zenoh_item.get('my_ip')
+
+    return mutable_item
+
+def mutable_to_string(mutable_item):
+    return f"\tkey: {mutable_item['pubkey']}\n \tsalt: {mutable_item['salt']} \n \tseq: {mutable_item['seq']} \n \tinfohash: {mutable_item['infohash']} \n \tmy IP: {mutable_item['my_ip']}"
+
+# ======================================================
+
+if __name__ == "__main__":
+    salt = "submaps" #input("Salt (dataset id): ").strip()
+
+    mutable_item = {
+        'pubkey' : b'1',
+        'salt' : salt,
+        'seq' : -1,
+        'infohash' : -1,
+        'my_ip' : MY_IP
+    }
+
+    start=time.time()
+    # Create session
+    ses = lt.session({
+        "listen_interfaces": f"{MY_IP}:6881,[::]:6881",
+        'enable_dht': False,
+        'alert_mask': (
+            lt.alert.category_t.all_categories
+        )
+    })
+    print(f'initiating torrent session took {time.time() - start}')
+
+    old_seq = mutable_item['seq']
+
+    # Configure Zenoh
+    start=time.time()
+    if params['device'] == 'docker':
+        cfg = zenoh.Config()
+        tcp = '["tcp/'+ params['router'] + ':7447"]'
+        cfg.insert_json5(
+            "connect/endpoints",
+            tcp
+        )
+    elif params['device'] == 'hunter':
+        cfg = zenoh.Config.from_file(f"{TORRENT_WS}/../hunter/hunter2_zenoh.json5")    
+
+    cfg.insert_json5("mode", '"client"')
+    cfg.insert_json5("listen/endpoints", "[]")
+    session = zenoh.open(cfg)
+    sub = session.declare_subscriber("mutable_items/**", on_sample)
+    print(f'initiating zenoh session took {time.time() - start}')
+
+    print(f"my IP: {MY_IP}")
+    print(f"listening on {ses.listen_port()}")
+    print("params: ",  params)
+
+    # Process messages in main thread
+    start=time.time()
+    try:
+        while True:
+            # Check for new messages (non-blocking)
+            if not message_queue.empty():
+                sample = message_queue.get()
                 
-                if b'v' in decoded:
-                    target_infohash = lt.sha1_hash(decoded[b'v'])
-                    print(f"[SUCCESS] Resolved infohash: {target_infohash}")
-            except Exception as e:
-                print(f"Item access error: {e}")
+                mutable_item = on_mutable_item(sample, mutable_item)
+                print(f"[zenoh]: new mutable item: \n{mutable_to_string(mutable_item)}")
+                
+                # i.e. if new infohash
+                if mutable_item['seq'] > old_seq: 
+                    print(f"[torrent]: adding \n\t infohash : {mutable_item['infohash']} \n\t save_path : {PATH} \n\t peers : {peers}")
+                    for handle in ses.get_torrents():
+                        ses.remove_torrent(handle)
 
-            if target_infohash:
-                print(f"[MUTABLE ITEM FOUND] Infohash: {target_infohash}\n")
+                    h = ses.add_torrent({
+                        'info_hash': mutable_item['infohash'],
+                        'save_path': PATH,
+                    })
+                    print(f"attempting connect_peer to {peers}")
+                    for ip, p in peers:
+                        h.connect_peer((ip, p))
 
-                if not torrent_added:
-                    params = {
-                        "info_hash": target_infohash,
-                        "save_path": SAVE_PATH,
-                    }
-                    handle = ses.add_torrent(params)
-                    # Use the handle to force-connect to the seeder
-                    handle.connect_peer((SEEDER_IP, SEEDER_PORT))
-                    torrent_added = True
-                    print("Torrent added, forced connection to seeder...")
-            else:
-                print(f"Malformed item received:")
+                    s = h.status()
+                    print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
+                    old_seq = mutable_item['seq'] # dont duplicate torrent handles
 
+            # Monitor existing torrents
+            for handle in ses.get_torrents():
+                s = handle.status()
+                print(f"[{handle.info_hash()}] Progress: {s.progress*100:.1f}%")
+                if s.progress == 0.0:
+                    transfer_start = time.time()
+                if s.progress == 1.0:
+                    print(f"completed torrent in {time.time() - transfer_start} s")
+                # for a in ses.pop_alerts():
+                #     print(f"[alert] {a}")
+                        
+            time.sleep(2)
 
-        # Metadata received
-        if isinstance(a, lt.metadata_received_alert):
-            print(f"[METADATA] Received metadata for torrent!")
-
-        # Torrent finished
-        if isinstance(a, lt.torrent_finished_alert):
-            print(f"[COMPLETE] Download finished!")
-
-        # ---- Torrent status ----
-        if isinstance(a, lt.state_update_alert):
-            for st in a.status:
-                print(
-                    f"peers:{st.num_peers} "
-                    f"seeds:{st.num_seeds} "
-                    f"progress:{st.progress * 100:.1f}% "
-                    f"down:{st.download_rate / 1000:.1f} kB/s"
-                )
-
-        # Periodic manual poke if metadata is missing
-    if handle and not handle.status().has_metadata:
-        handle.connect_peer((SEEDER_IP, SEEDER_PORT))
-
-    ses.post_torrent_updates()
-    time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nExiting...")
+        print(f'time from callback until killed: {time.time() - start}')
+        session.close()

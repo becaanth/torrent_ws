@@ -13,6 +13,7 @@ def load_state(state_file):
     if os.path.exists(state_file):
         with open(state_file, "r") as f:
             return json.load(f)
+    print(f"[load_state] couldn't load state")
     return None
 
 def save_state(state, state_file):
