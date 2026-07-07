@@ -1,0 +1,20 @@
+session_name: dev_peer
+windows:
+  - window_name: peer
+    layout: tiled
+    panes:
+      # - shell_command:
+      #   # zenoh router
+      #     - zenohd --cfg 'scouting/multicast/enabled:false'
+      - shell_command:
+        # peer 
+          - source $VTRSRC/main/install/setup.bash
+          - cd $VTRROOT/torrent_ws/scripts
+          - rm -r $VTRTEMP/torrent_pcs/utias
+          - python3 torrent/mutable_peer.py
+      - shell_command:
+        # reconstitution
+          - source $VTRSRC/main/install/setup.bash
+          - cd $VTRROOT/torrent_ws/scripts
+          - rm -r $VTRTEMP/pgs/rutias
+          - python3 posegraph/live_reconstitution.py -b utias --piece_root /home/asrl/ASRL/vtr3/temp/torrent_pcs
