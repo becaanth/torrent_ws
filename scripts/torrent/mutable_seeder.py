@@ -23,6 +23,7 @@ import pdb
 
 # zenohd --cfg 'scouting/multicast/enabled:false'
 
+# DEVICE CONFIGS
 ROBOT_IPS = {
     'mr_green':'192.168.2.42',
     'prof_plum':'192.168.3.42',
@@ -36,151 +37,181 @@ DOCKER_IPS = {
     'torrent1':'172.18.0.3'
 }
 
-# -------------------------
-# Immutable snapshot
-# -------------------------
-def create_snapshot(input_path, output_path, posegraph):
+class MutableSeeder:
     """
-    Generate new .torrent for a directory
+    Monitor the /pcs directory for a specific robot and seed a mutable torrent session
+    This entails:
+    1) update Zenoh discovery messages and broadcast
+    2) seed the immutable snapshots
     """
-    fs = lt.file_storage()
-    lt.add_files(fs, input_path)
+    def __init__(self, params : dict, robot_id : int, state : str, poll_hz : float):
+        # robot params
+        self.container = params['container']
+        self.my_ip, z_cfg = self.unpack_device(params)
+        self.router = params['router']
 
-    t = lt.create_torrent(fs)
+        # data params
+        self.posegraph = params['posegraph']
+        self.robot_id = robot_id
+        self.state = state
+        # file system
+        self.input_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}/{self.robot_id}"
+        self.metadata_path = "scripts/torrent/metadata"
+        os.makedirs(self.input_path, exist_ok=True)
+        os.makedirs(self.metadata_path, exist_ok=True)
     
-    PIECE_SIZE = 2 * 1024 * 1024 # padding
-    t.piece_size(PIECE_SIZE)
-    lt.set_piece_hashes(t, os.path.dirname(input_path))
-    torrent_dict = t.generate()
-    wrote_idx = False
-    # annotate each entry in the dictionary
-    for i, file_entry in enumerate(torrent_dict[b"info"][b"files"]):
-        # if b"attr" in file_entry and b"p" in file_entry[b"attr"]: # skip padding files
-        #     continue
-        filename = file_entry[b"path"][-1].decode()
-        print(f"{input_path}/{filename}")
-        if wrote_idx == False:
-            idx = get_map_info(f"{input_path}/{filename}")
-            file_entry[b"x-idx"] = msgpack.packb(
-                {"idx": idx_to_dict(idx)}, use_bin_type=True
+        # libtorrent
+        self.t_ses = lt.session({
+            "listen_interfaces": f"{self.my_ip}:6881,[::]:6881",
+            "enable_dht": False,
+            "alert_mask": (
+                lt.alert.category_t.all_categories
+            ),
+        })
+
+        # zenoh
+        z_cfg.insert_json5("mode", '"client"')
+        z_cfg.insert_json5("listen/endpoints", "[]")
+        self.z_ses = zenoh.open(z_cfg)
+
+        # mutable update
+        salt = "submaps"
+        sk = SigningKey(bytes.fromhex(self.state["sk"]))
+
+        self.mi = { 
+        'pubkey' : sk.verify_key.encode(),
+        'salt' : salt,
+        'seq' : self.state['seq'][salt],
+        'infohash' : -1,
+        'my_ip' : self.my_ip
+        }
+
+        # etc
+        self.poll_hz = poll_hz
+        self.start_flag = False
+
+    def unpack_device(self, params : dict):
+        """
+        Load IPs, Zenoh config, robot names according to a config
+        """
+        d = params['device']
+
+        if d == 'docker':
+            my_ip = DOCKER_IPS[params['container']]
+            cfg = zenoh.Config()
+            tcp = '["tcp/'+ params['router'] + ':7447"]'
+            cfg.insert_json5("connect/endpoints", tcp)
+        elif d == 'hunter':
+            my_ip = ROBOT_IPS[params['container']]
+            cfg = zenoh.Config.from_file(f"../warthog/hunter2_zenoh.json5")    
+        else:
+            print('bad params/device')
+
+        print(f"[unpack] my_ip {my_ip}")
+        return my_ip, cfg
+
+    def run(self):
+        """
+        run the main loop
+        """
+        print(f"[Seeder] polling at {self.poll_hz} Hz (Ctrl-C to stop)")
+        try: 
+            while True:
+                self._poll()
+                time.sleep(1.0 / self.poll_hz)
+        except KeyboardInterrupt:
+            print("\n[Seeder] stopped.")
+        finally:
+            self.z_ses.close()
+
+    def _poll(self):
+        if has_new_file(self.input_path) or self.start_flag == False:
+            self.start_flag = True
+
+            # create snapshot of pcs dir
+            ti = self.create_snapshot()
+            infohash = ti.info_hash()
+            handle = self.t_ses.add_torrent({"ti" : ti, "save_path" : os.path.dirname(self.input_path)})
+            print(f"[snapshot] created with hash {ti}")
+
+            # update mutable item
+            self.mi['infohash'] = infohash.to_bytes()
+            self.mi['seq']+=1
+            print(f"[zenoh] adding mutable item: {self.mi['infohash']}") #\n{mutable_to_string(mutable_item)}")
+                
+        if self.start_flag:
+            # pub gossip over Zenoh
+            print("[zenoh]: pub mutable item")
+            payload = msgpack.packb(self.mi, use_bin_type=True)
+            self.z_ses.put(f"mutable_items/{self.robot_id}", payload)      
+            handle = self.t_ses.get_torrents()[0]
+            status = handle.status()
+            
+            print(f"\tProgress: {status.progress*100:.1f}% | Peers: {status.num_peers} | Down: {status.download_rate/1000:.1f} KB/s")
+
+    def create_snapshot(self):
+        """
+        Generate new .torrent for a directory
+        """
+        fs = lt.file_storage()
+        lt.add_files(fs, self.input_path)
+
+        t = lt.create_torrent(fs)
+        
+        PIECE_SIZE = 2 * 1024 * 1024 # padding
+        t.piece_size(PIECE_SIZE)
+        lt.set_piece_hashes(t, os.path.dirname(self.input_path))
+        torrent_dict = t.generate()
+        wrote_idx = False
+        # annotate each entry in the dictionary
+        for i, file_entry in enumerate(torrent_dict[b"info"][b"files"]):
+            # if b"attr" in file_entry and b"p" in file_entry[b"attr"]: # skip padding files
+            #     continue
+            filename = file_entry[b"path"][-1].decode()
+            if wrote_idx == False:
+                idx = get_map_info(f"{self.input_path}/{filename}")
+                file_entry[b"x-idx"] = msgpack.packb(
+                    {"idx": idx_to_dict(idx)}, use_bin_type=True
+                )
+                wrote_idx = True
+
+            vertices, edges = parse_chunk(f"{self.input_path}/{filename}")
+            file_entry[b"x-vertices"] = msgpack.packb(
+                [vertex_to_dict(v) for v in vertices], use_bin_type=True
             )
-            wrote_idx = True
+            file_entry[b"x-edges"] = msgpack.packb(
+                [edge_to_dict(e) for e in edges], use_bin_type=True
+            )
 
-        vertices, edges = parse_chunk(f"{input_path}/{filename}")
-        file_entry[b"x-vertices"] = msgpack.packb(
-            [vertex_to_dict(v) for v in vertices], use_bin_type=True
-        )
-        file_entry[b"x-edges"] = msgpack.packb(
-            [edge_to_dict(e) for e in edges], use_bin_type=True
-        )
+        out_file = os.path.join(self.metadata_path, f"{self.posegraph}.torrent")
+        ti = lt.torrent_info(torrent_dict)
 
-    out_file = os.path.join(output_path, f"{posegraph}.torrent")
-    ti = lt.torrent_info(torrent_dict)
+        with open(out_file, "wb") as f:
+            f.write(lt.bencode(torrent_dict))
 
-    with open(out_file, "wb") as f:
-        f.write(lt.bencode(torrent_dict))
-
-    return ti
+        return ti
 
 # ======================================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description = 'Seed mutable torrents')
-    parser.add_argument('-p', '--posegraph', type=str, default=None, help="Name of posegraph") 
-    parser.add_argument('-r', '--robot_id', type=int, default=0, help="")
-    parser.add_argument('-d', '--device', type=str, default='docker', help="running in \'docker\' or \'hunter\'")
-    parser.add_argument('-s', '--seeder', type=str, default='seeder_params.json', help="path to seeder params")
+    parser = argparse.ArgumentParser(description="Mutable Seeder (LibTorrent + Zenoh)")
+    parser.add_argument('-p', '--posegraph', type=str, required = True, help = "pose_graph name")
+    parser.add_argument('-s', '--seeder_params', type=str, default = 'seeder_params.json')
+    parser.add_argument('-r', '--robot_id', type=int, default = 0)
+    parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
+    parser.add_argument('--poll_hz', type=float, default = 0.25)
     args = parser.parse_args()
 
-    posegraph = args.posegraph
-    robot_id = args.robot_id
-    device = args.device
-    seeder_params = args.seeder
-
-    # Networking setup
-    if device == 'docker':
-        torrent_ws = "/home/asrl/ASRL/vtr3/torrent_ws"
-        with open(f'{torrent_ws}/scripts/torrent/{seeder_params}', "r") as f:
+    with open(f'torrent/{args.seeder_params}', "r") as f:
                 params = json.load(f)
-        MY_IP = DOCKER_IPS[params['robot_id']]
-        cfg = zenoh.Config()
-        tcp = '["tcp/'+ params['router'] + ':7447"]'
-        cfg.insert_json5("connect/endpoints", tcp)
-    elif device == 'hunter':
-        torrent_ws = "/home/indro/ASRL/vtr3/torrent_ws"
-        with open(f'{torrent_ws}/scripts/torrent/{seeder_params}', "r") as f:
-                params = json.load(f)
-        MY_IP = ROBOT_IPS[params['robot_id']]
-        cfg = zenoh.Config.from_file(f"{torrent_ws}/../warthog/hunter2_zenoh.json5")    
-    else:
-        print('bad params/device')
 
-    # File setup
-    input_path = f"{os.getenv('VTRTEMP')}/pcs/{params['posegraph']}/{robot_id}"
-    output_path = f"{torrent_ws}/scripts/torrent/metadata"
-    state_file = f"{torrent_ws}/scripts/torrent/mutable_state.json"
+    with open(f'torrent/{args.state_file}', "r") as f:
+                state = json.load(f)
 
-    salt = "submaps" #input("Salt (dataset id): ").strip()
-    state = load_state(state_file=state_file)
-    sk = SigningKey(bytes.fromhex(state["sk"]))
-
-    # Define a mutable item
-    mutable_item = {
-        'pubkey' : sk.verify_key.encode(),
-        'salt' : salt,
-        'seq' : state['seq'][salt],
-        'infohash' : -1,
-        'my_ip' : MY_IP
-    }
-
-    # Initiate torrent session
-    start=time.time()
-    ses = lt.session({
-        "listen_interfaces": f"{MY_IP}:6881,[::]:6881",
-        "enable_dht": False,
-        "alert_mask": (
-            lt.alert.category_t.all_categories
-        ),
-    })
-    print(f'initiating torrent session took {time.time() - start}')
-
-    # Setup Zenoh
-    cfg.insert_json5("mode", '"client"')
-    cfg.insert_json5("listen/endpoints", "[]")
-    session = zenoh.open(cfg)
-
-    print(f"my IP: {MY_IP} listening on {ses.listen_port()} params: {params}")
-
-    # callback loop
-    start_flag = False
-    os.makedirs(input_path, exist_ok=True)
-    os.makedirs(output_path, exist_ok=True)
-    try: 
-        while True:
-            if has_new_file(input_path) or start_flag == False:
-                start_flag = True
-                
-                # Create snapshot
-                ti = create_snapshot(input_path, output_path, posegraph=params['posegraph'])
-                infohash = ti.info_hash()
-                h = ses.add_torrent({"ti" : ti, "save_path" : os.path.dirname(input_path)})
-                mutable_item['infohash'] = infohash.to_bytes()
-                mutable_item['seq']+=1
-                print(f"[torrent] adding mutable item: {mutable_item['infohash']}") #\n{mutable_to_string(mutable_item)}")
-                payload = msgpack.packb(mutable_item, use_bin_type=True)
-                    
-            if start_flag:
-                print("[zenoh]: pub mutable item")
-                session.put(f"mutable_items/{params['robot_id']}", payload)            
-                s = h.status()
-                
-                print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
-                if s.progress == 0.0:
-                    transfer_start = time.time()
-                if s.progress == 1.0:
-                    print(f"completed torrent in {time.time() - transfer_start} s")
-            time.sleep(5)
-
-    except KeyboardInterrupt:
-        print("\nExiting...")
-        session.close()
+    mutable_seeder = MutableSeeder(
+        params=params,
+        robot_id=args.robot_id,
+        state=state,
+        poll_hz=args.poll_hz
+    )
+    mutable_seeder.run()
