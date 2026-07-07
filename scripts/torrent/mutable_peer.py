@@ -3,17 +3,13 @@ import libtorrent as lt
 import time
 import zenoh
 import msgpack
-import json
 from queue import Queue
 import os
-import pdb
+import argparse
 
-try:
-    if os.path.exists('scripts/torrent/peer_params.json'):
-        with open('scripts/torrent/peer_params.json', "r") as f:
-            params = json.load(f)
-except:
-    print("can't open params, navigate to torrent_ws")
+from torrent_utils import *
+
+import pdb
 
 ROBOT_IPS = {
     'mr_green':'192.168.2.42',
@@ -28,140 +24,152 @@ DOCKER_IPS = {
     'torrent1':'172.18.0.3'
 }
 
-peers = []
-port = 6881
+class MutablePeer:
+    """
+    Listen to Zenoh gossip, join a torrent session
+    """
+    def __init__(self, params : dict, state : dict):
+        # robot params
+        self.container = params['container']
+        self.peers = []
+        self.my_ip, z_cfg = self.unpack_device(params)
+        self.router = params['router']
 
-if params['device'] == 'docker':
-    TORRENT_WS = "/home/asrl/ASRL/vtr3/torrent_ws"
-    MY_IP = DOCKER_IPS[params['robot_id']]
-    for key in DOCKER_IPS.keys():
-        if key != params['robot_id']:
-            peers.append((DOCKER_IPS[key], port))
+        # data params
+        self.posegraph = params['posegraph']
+        self.state = state
 
-elif params['device'] == 'hunter':
-    TORRENT_WS = "/home/indro/ASRL/vtr3/torrent_ws"
-    MY_IP = ROBOT_IPS[params['robot_id']]
-    for key in ROBOT_IPS.keys():
-        if key != params['robot_id']:
-            peers.append((ROBOT_IPS[key], port))
-else:
-    print('bad params')
+        # file system
+        self.input_path = f"{os.getenv('VTRTEMP')}/torrent_pcs/{self.posegraph}"
+        os.makedirs(self.input_path, exist_ok=True)
 
-robot_id = 0
-PATH = f"/home/asrl/ASRL/vtr3/temp/torrent_pcs/{params['posegraph']}/"
-STATE_FILE = f"{TORRENT_WS}/scripts/torrent/mutable_state.json"
+        # libtorrent
+        self.t_ses = lt.session({
+            "listen_interfaces": f"{self.my_ip}:6881,[::]:6881",
+            'enable_dht': False,
+            'alert_mask': (
+                lt.alert.category_t.all_categories
+            )
+        })
 
-message_queue = Queue()
+        # zenoh
+        self.message_queue = Queue()
+        z_cfg.insert_json5("mode", '"client"')
+        z_cfg.insert_json5("listen/endpoints", "[]")
+        self.z_ses = zenoh.open(z_cfg)
+        self.sub = self.z_ses.declare_subscriber("mutable_items/**", self.on_sample)
+        
+        # mutable updates
+        salt = "submaps" 
+        self.mi = {
+            'pubkey' : b'1',
+            'salt' : salt,
+            'seq' : -1,
+            'infohash' : -1,
+            'my_ip' : self.my_ip
+        }
+        self.seq = self.mi['seq'] # sequence number
 
-def on_sample(sample):
-    print('Received Zenoh message')
-    message_queue.put(sample)
+        # etc
 
-def on_mutable_item(sample, mutable_item):
-    # Decode payload, update mutable_item
-    zenoh_item = msgpack.unpackb(bytes(sample.payload), raw=False)
+    def unpack_device(self, params : dict):
+        """
+        Load IPs, Zenoh config, robot names according to a config
+        """
+        d = params['device']
 
-    mutable_item['pubkey'] = zenoh_item.get('pubkey')
-    mutable_item['infohash'] = zenoh_item.get('infohash')
-    mutable_item['seq'] = zenoh_item.get('seq')
-    mutable_item['my_ip'] = zenoh_item.get('my_ip')
+        if d == 'docker':
+            my_ip = DOCKER_IPS[params['container']]
+            cfg = zenoh.Config()
+            tcp = '["tcp/'+ params['router'] + ':7447"]'
+            cfg.insert_json5("connect/endpoints", tcp)
+            for key in DOCKER_IPS.keys():
+                if key != params['container']:
+                    self.peers.append((DOCKER_IPS[key], 6881))
+        elif d == 'hunter':
+            my_ip = ROBOT_IPS[params['container']]
+            cfg = zenoh.Config.from_file(f"../warthog/hunter2_zenoh.json5")    
+            for key in ROBOT_IPS.keys():
+                if key != params['robot_id']:
+                    self.peers.append((ROBOT_IPS[key], 6881))
+        else:
+            print('bad params/device')
 
-    return mutable_item
+        print(f"[unpack] my_ip {my_ip}")
+        return my_ip, cfg
 
-def mutable_to_string(mutable_item):
-    return f"\tkey: {mutable_item['pubkey']}\n \tsalt: {mutable_item['salt']} \n \tseq: {mutable_item['seq']} \n \tinfohash: {mutable_item['infohash']} \n \tmy IP: {mutable_item['my_ip']}"
+    def run(self):
+        """
+        run the main loop
+        """
+        print(f"[peer] running the main loop (Ctrl-C to stop)")
+        try:
+            while True:
+                self._flush_queue()
+        except KeyboardInterrupt:
+            print("\n[peer] stopped")
+        finally:
+            self.z_ses.close()
+
+    def _flush_queue(self):
+        """
+        flush self.message_queue
+        """
+        # Check for new messages (non-blocking)
+        if not self.message_queue.empty():
+            sample = self.message_queue.get()
+            
+            self.mi = on_mutable_item(sample)
+            print(f"[zenoh]: new mutable item: \n{mutable_to_string(self.mi)}")
+            
+            # i.e. if new infohash
+            if self.mi['seq'] > self.seq: 
+                print(f"[torrent]: adding \n\t infohash : {self.mi['infohash']} \n\t peers : {self.peers}")
+                for handle in self.t_ses.get_torrents():
+                    self.t_ses.remove_torrent(handle)
+
+                h = self.t_ses.add_torrent({
+                    'info_hash': self.mi['infohash'],
+                    'save_path': self.input_path,
+                })
+                print(f"attempting connect_peer to {self.peers}")
+                for ip, p in self.peers:
+                    h.connect_peer((ip, p))
+
+                s = h.status()
+                print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
+                self.seq = self.mi['seq'] # dont duplicate torrent handles
+
+        # Monitor existing torrents
+        for handle in self.t_ses.get_torrents():
+            s = handle.status()
+            print(f"[{handle.info_hash()}] Progress: {s.progress*100:.1f}%")
+            # for a in ses.pop_alerts():
+            #     print(f"[alert] {a}")
+                    
+        time.sleep(2)
+
+    def on_sample(self, sample):
+        print('Received Zenoh message')
+        self.message_queue.put(sample)
+
 
 # ======================================================
 
 if __name__ == "__main__":
-    salt = "submaps" #input("Salt (dataset id): ").strip()
+    parser = argparse.ArgumentParser(description="Mutable Peer (LibTorrent + Zenoh)")
+    parser.add_argument('-s', '--peer_params', type=str, default = 'peer_params.json')
+    parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
+    args = parser.parse_args()
 
-    mutable_item = {
-        'pubkey' : b'1',
-        'salt' : salt,
-        'seq' : -1,
-        'infohash' : -1,
-        'my_ip' : MY_IP
-    }
+    with open(f'torrent/{args.peer_params}', "r") as f:
+                params = json.load(f)
 
-    start=time.time()
-    # Create session
-    ses = lt.session({
-        "listen_interfaces": f"{MY_IP}:6881,[::]:6881",
-        'enable_dht': False,
-        'alert_mask': (
-            lt.alert.category_t.all_categories
-        )
-    })
-    print(f'initiating torrent session took {time.time() - start}')
+    with open(f'torrent/{args.state_file}', "r") as f:
+                state = json.load(f)
 
-    old_seq = mutable_item['seq']
-
-    # Configure Zenoh
-    start=time.time()
-    if params['device'] == 'docker':
-        cfg = zenoh.Config()
-        tcp = '["tcp/'+ params['router'] + ':7447"]'
-        cfg.insert_json5(
-            "connect/endpoints",
-            tcp
-        )
-    elif params['device'] == 'hunter':
-        cfg = zenoh.Config.from_file(f"{TORRENT_WS}/../hunter/hunter2_zenoh.json5")    
-
-    cfg.insert_json5("mode", '"client"')
-    cfg.insert_json5("listen/endpoints", "[]")
-    session = zenoh.open(cfg)
-    sub = session.declare_subscriber("mutable_items/**", on_sample)
-    print(f'initiating zenoh session took {time.time() - start}')
-
-    print(f"my IP: {MY_IP}")
-    print(f"listening on {ses.listen_port()}")
-    print("params: ",  params)
-
-    # Process messages in main thread
-    start=time.time()
-    try:
-        while True:
-            # Check for new messages (non-blocking)
-            if not message_queue.empty():
-                sample = message_queue.get()
-                
-                mutable_item = on_mutable_item(sample, mutable_item)
-                print(f"[zenoh]: new mutable item: \n{mutable_to_string(mutable_item)}")
-                
-                # i.e. if new infohash
-                if mutable_item['seq'] > old_seq: 
-                    print(f"[torrent]: adding \n\t infohash : {mutable_item['infohash']} \n\t save_path : {PATH} \n\t peers : {peers}")
-                    for handle in ses.get_torrents():
-                        ses.remove_torrent(handle)
-
-                    h = ses.add_torrent({
-                        'info_hash': mutable_item['infohash'],
-                        'save_path': PATH,
-                    })
-                    print(f"attempting connect_peer to {peers}")
-                    for ip, p in peers:
-                        h.connect_peer((ip, p))
-
-                    s = h.status()
-                    print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
-                    old_seq = mutable_item['seq'] # dont duplicate torrent handles
-
-            # Monitor existing torrents
-            for handle in ses.get_torrents():
-                s = handle.status()
-                print(f"[{handle.info_hash()}] Progress: {s.progress*100:.1f}%")
-                if s.progress == 0.0:
-                    transfer_start = time.time()
-                if s.progress == 1.0:
-                    print(f"completed torrent in {time.time() - transfer_start} s")
-                # for a in ses.pop_alerts():
-                #     print(f"[alert] {a}")
-                        
-            time.sleep(2)
-
-    except KeyboardInterrupt:
-        print("\nExiting...")
-        print(f'time from callback until killed: {time.time() - start}')
-        session.close()
+    mutable_peer = MutablePeer(
+        params=params,
+        state=state
+    )
+    mutable_peer.run()

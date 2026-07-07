@@ -43,6 +43,20 @@ def has_new_file(directory, last_count=[0]):
     print(f'Is there a new file? {tf}')    
     return tf
 
+def sqlite_file_filter(file_path: str) -> bool:
+    """
+    Returns True if .db3, else False
+    """
+    # libtorrent usually passes the full or relative path as a string
+    filename = os.path.basename(file_path)
+    
+    # Filter out SQLite write-ahead logs and rollback journals
+    if filename.endswith('.db3-wal') or filename.endswith('.db3-journal'):
+        print(f"Skipping temporary SQLite file: {filename}")
+        return False
+        
+    return True
+
 def mutable_to_string(mutable_item):
     return f"\tkey: {mutable_item['pubkey']}\n \tsalt: {mutable_item['salt']} \n \tseq: {mutable_item['seq']} \n \tinfohash: {mutable_item['infohash']} \n \tmy IP: {mutable_item['my_ip']}"
 
@@ -85,3 +99,16 @@ def inspect_torrent(path):
             pieces.append(Piece(top_vertices=vertices, top_edges=edges, metadata_written=False))
 
     return pieces, idx['idx']
+
+def on_mutable_item(sample):
+    # Update mutable item
+    zenoh_item = msgpack.unpackb(bytes(sample.payload), raw=False)
+    mutable_item = {
+        'pubkey' : zenoh_item.get('pubkey'),
+        'salt' : 'submaps',
+        'seq' : zenoh_item.get('seq'),
+        'infohash' : zenoh_item.get('infohash'),
+        'my_ip' : zenoh_item.get('my_ip')
+    }
+
+    return mutable_item
