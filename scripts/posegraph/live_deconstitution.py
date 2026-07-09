@@ -133,7 +133,7 @@ class Deconstitutor:
         # index df read lazily on first successful connection
         self._index_df: pd.DataFrame | None = None
 
-        print(f"[Deconstitutor] output: {output_dir}")
+        print(f"[Deconstitutor] initialized with output_dir: {output_dir}")
 
     # ------------------------------------------------------------------
     # Public
@@ -173,7 +173,6 @@ class Deconstitutor:
                 try:
                     self._index_df = _read_full_df(conn)
                     self._last_rowid['index'] = int(self._index_df['rowid'].max()) if len(self._index_df) else 0
-                    print(f"[Deconstitutor] index: {len(self._index_df)} rows")
                 except Exception as e:
                     print(f"[Deconstitutor] index: not ready yet ({e})")
 
@@ -263,20 +262,16 @@ class Deconstitutor:
                 continue
 
             sid = int(sid)
-            print(f"  [chunk {i}] sid={sid}")
 
             # only write chunks originated by this robot; other pieces will have come from torrent
             originator_id = extract_robot_id(sid)
             if (originator_id != robot_id):
-                print(f"   [chunk {i}] robot id {robot_id} does not match submap originator id {originator_id}")
                 self._written_chunks.add(i)
                 continue
 
             # Rows in pointmap_ptr that belong to this submap
             ptr_row_idxs = np.where(self._map_vids == sid)[0]
-            print(f"  [chunk {i}] pointmap_ptr rows for sid={sid}: {ptr_row_idxs}")
             if len(ptr_row_idxs) == 0:
-                print(f"  [chunk {i}] SKIP: no pointmap_ptr rows yet")
                 continue
 
             # actual vertex IDs belonging to this submap
@@ -284,7 +279,6 @@ class Deconstitutor:
 
             # pointmap row — single row at position i in accumulated df
             if i >= len(self._df['pointmap']):
-                print(f"  [chunk {i}] SKIP: pointmap row {i} not yet in df (len={len(self._df['pointmap'])})")
                 continue
             chunk_submap = self._df['pointmap'].iloc[[i]]
 
@@ -293,9 +287,6 @@ class Deconstitutor:
 
             # waypoint_name and env_info rows at same indices
             max_idx = int(max(ptr_row_idxs))
-            print(f"  [chunk {i}] max_idx={max_idx}  "
-                  f"waypoint_name rows={len(self._df['waypoint_name'])}  "
-                  f"env_info rows={len(self._df['env_info'])}")
             if len(self._df['waypoint_name']) <= max_idx or len(self._df['env_info']) <= max_idx:
                 print(f"  [chunk {i}] SKIP: waypoint_name or env_info not yet arrived")
                 continue
@@ -305,7 +296,6 @@ class Deconstitutor:
             # vertices whose vertex_id is in relevant_vids
             v_mask    = np.isin(self._vertex_ids, relevant_vids)
             valid_vtx = np.where(v_mask)[0]
-            print(f"  [chunk {i}] vertex_ids matching relevant_vids={relevant_vids}: {self._vertex_ids[v_mask]}")
             if len(valid_vtx) == 0:
                 print(f"  [chunk {i}] SKIP: no matching vertices")
                 continue
@@ -315,7 +305,6 @@ class Deconstitutor:
             # edges whose from_id is in relevant_vids
             e_mask      = np.isin(self._from_ids, relevant_vids)
             valid_edges = np.where(e_mask)[0]
-            print(f"  [chunk {i}] from_ids matching relevant_vids={relevant_vids}: {self._from_ids[e_mask]}")
             sort_eidx   = np.argsort(self._from_ids[e_mask])
             chunk_edges = self._df['edges'].iloc[valid_edges[sort_eidx]]
             # edges can be empty for the last submap — allow it
@@ -338,9 +327,10 @@ class Deconstitutor:
             _drop_rowid(chunk_submap_ptrs).to_sql('pointmap_ptr', conn, if_exists='replace', index=False)
             conn.close()
 
-            pad_file_to_exact_size(db_path, PIECE_SIZE)
-            self._written_chunks.add(i)
-            print(f"[Deconstitutor] wrote chunk {str(hex(int(sid)))[2:].zfill(16)}.db3  (submap vertex_id={sid})")
+            if (os.path.getsize(db_path)) > 0:
+                pad_file_to_exact_size(db_path, PIECE_SIZE)
+                self._written_chunks.add(i)
+                print(f"[Deconstitutor] wrote chunk {str(hex(int(sid)))[2:].zfill(16)}.db3  (submap vertex_id={sid})")
 
     # ------------------------------------------------------------------
     # Cleanup
