@@ -91,7 +91,7 @@ class MutablePeer:
                 if key != params['robot_id']:
                     self.peers.append((ROBOT_IPS[key], 6881))
         else:
-            print('bad params/device')
+            print("[unpack] bad params/device")
 
         print(f"[unpack] my_ip {my_ip}")
         return my_ip, cfg
@@ -119,7 +119,6 @@ class MutablePeer:
             sample = self.message_queue.get()
             
             mutable_item = on_mutable_item(sample)
-            print(f"[zenoh]: new mutable item: \n{mutable_to_string(mutable_item)}")
 
             # check if new session discovered
             existing_ids = {mi['robot_id'] for mi in self.mutable_items if 'robot_id' in mi}
@@ -147,23 +146,19 @@ class MutablePeer:
                     'info_hash': mutable_item['infohash'],
                     'save_path': save_path
                 })
-                print(f'save path : {save_path}')
                 print(f"attempting connect_peer to {self.peers}")
                 for ip, p in self.peers:
                     h.connect_peer((ip, p))
 
                 s = h.status()
-                print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
 
         # Monitor existing torrents
         for handle in self.t_ses.get_torrents():
             s = handle.status()
             print(f"[{handle.info_hash()}] Progress: {s.progress*100:.1f}%")
-            # for a in ses.pop_alerts():
-            #     print(f"[alert] {a}")
                 
     def on_sample(self, sample):
-        print('Received Zenoh message')
+        print('[on_sample]: Received Zenoh message')
         self.message_queue.put(sample)
 
     # orchestrator callbacks
