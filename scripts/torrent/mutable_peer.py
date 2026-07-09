@@ -27,7 +27,9 @@ class MutablePeer:
     """
     Listen to Zenoh gossip, join a torrent session
     """
-    def __init__(self, params : dict, state : dict, poll_hz : float = 0.5):
+    def __init__(self, params : dict, state : dict, poll_hz : float = 0.5,
+                 on_torrent_discovered=None, on_metadata_received=None):
+        
         # robot params
         self.container = params['container']
         self.peers = []
@@ -39,8 +41,8 @@ class MutablePeer:
         self.state = state
 
         # file system
-        self.input_path = f"{os.getenv('VTRTEMP')}/torrent_pcs/{self.posegraph}"
-        os.makedirs(self.input_path, exist_ok=True)
+        self.output_path = f"{os.getenv('VTRTEMP')}/torrent_pcs/{self.posegraph}"
+        os.makedirs(self.output_path, exist_ok=True)
 
         # libtorrent
         self.t_ses = lt.session({
@@ -59,15 +61,11 @@ class MutablePeer:
         self.sub = self.z_ses.declare_subscriber("mutable_items/**", self.on_sample)
         
         # mutable updates
-        salt = "submaps" 
-        self.mi = {
-            'pubkey' : b'1',
-            'salt' : salt,
-            'seq' : -1,
-            'infohash' : -1,
-            'my_ip' : self.my_ip
-        }
-        self.seq = self.mi['seq'] # sequence number
+        self.mutable_items = [] # TODO: support mi from multiple sessions
+
+        # inversion of control callbacks
+        self.on_torrent_discovered = on_torrent_discovered # spawn MutableSeeder # TODO wire
+        self.on_metadata_received = on_metadata_received   # pass to Reconstitutor # TODO wire
 
         # etc
         self.poll_hz = poll_hz
@@ -120,30 +118,42 @@ class MutablePeer:
         if not self.message_queue.empty():
             sample = self.message_queue.get()
             
-            self.mi = on_mutable_item(sample)
-            print(f"[zenoh]: new mutable item: \n{mutable_to_string(self.mi)}")
+            mutable_item = on_mutable_item(sample)
+            print(f"[zenoh]: new mutable item: \n{mutable_to_string(mutable_item)}")
 
-            if self.mi['my_ip'] == self.my_ip:
+            # check if new session discovered
+            existing_ids = {mi['robot_id'] for mi in self.mutable_items if 'robot_id' in mi}
+            if mutable_item['robot_id'] not in existing_ids:
+                self.mutable_items.append(mutable_item)
+                 
+            # check if heard own seeder
+            if mutable_item['my_ip'] == self.my_ip:
                 print(f"[flush]: skipping. don't leech own pieces")
                 return
             
-            # i.e. if new infohash
-            if self.mi['seq'] > self.seq: 
-                print(f"[torrent]: adding \n\t infohash : {self.mi['infohash']} \n\t peers : {self.peers}")
-                for handle in self.t_ses.get_torrents():
-                    self.t_ses.remove_torrent(handle)
+            # check if infohash has been updated
+            saved_mi = self.mutable_items[mutable_item['robot_id']]
+            if mutable_item['seq'] >= saved_mi['seq']: # what if we torrent a completed map? then these are equal
+                # overwrite
+                print(f"[torrent]: adding \n\t infohash : {mutable_item['infohash']} \n\t peers : {self.peers}")
+                self.mutable_items[mutable_item['robot_id']] = mutable_item
 
+                for handle in self.t_ses.get_torrents():
+                    if mutable_item['seq'] > saved_mi['seq']:
+                        self.t_ses.remove_torrent(handle)
+
+                save_path =  f"{self.output_path}"
                 h = self.t_ses.add_torrent({
-                    'info_hash': self.mi['infohash'],
-                    'save_path': self.input_path,
+                    'info_hash': mutable_item['infohash'],
+                    'save_path': save_path
                 })
+                print(f'save path : {save_path}')
                 print(f"attempting connect_peer to {self.peers}")
                 for ip, p in self.peers:
                     h.connect_peer((ip, p))
 
                 s = h.status()
                 print(f"\tProgress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
-                self.seq = self.mi['seq'] # dont duplicate torrent handles
 
         # Monitor existing torrents
         for handle in self.t_ses.get_torrents():
@@ -155,6 +165,13 @@ class MutablePeer:
     def on_sample(self, sample):
         print('Received Zenoh message')
         self.message_queue.put(sample)
+
+    # orchestrator callbacks
+    def on_torrent_discovered():
+        pass
+
+    def on_metata_received():
+        pass
 
 
 # ======================================================
