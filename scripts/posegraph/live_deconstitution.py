@@ -327,10 +327,9 @@ class Deconstitutor:
             _drop_rowid(chunk_submap_ptrs).to_sql('pointmap_ptr', conn, if_exists='replace', index=False)
             conn.close()
 
-            if (os.path.getsize(db_path)) > 0:
-                pad_file_to_exact_size(db_path, PIECE_SIZE)
-                self._written_chunks.add(i)
-                print(f"[Deconstitutor] wrote chunk {str(hex(int(sid)))[2:].zfill(16)}.db3  (submap vertex_id={sid})")
+            pad_file_to_exact_size(db_path, PIECE_SIZE)
+            self._written_chunks.add(i)
+            print(f"[Deconstitutor] wrote chunk {str(hex(int(sid)))[2:].zfill(16)}.db3  (submap vertex_id={sid})")
 
     # ------------------------------------------------------------------
     # Cleanup

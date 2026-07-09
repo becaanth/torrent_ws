@@ -36,7 +36,7 @@ class MutableSeeder:
     1) update Zenoh discovery messages and broadcast
     2) seed the immutable snapshots
     """
-    def __init__(self, params : dict, robot_id : int, state : dict, poll_hz : float):
+    def __init__(self, params : dict, robot_id : int, state : dict, poll_hz : float = 0.25):
         # robot params
         self.container = params['container']
         self.my_ip, z_cfg = self.unpack_device(params)
@@ -49,6 +49,7 @@ class MutableSeeder:
 
         # file system
         self.input_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}/{self.robot_id}"
+        self.bencoded_torrent_dict = {}
         self.metadata_path = "scripts/torrent/metadata"
         os.makedirs(self.input_path, exist_ok=True)
         os.makedirs(self.metadata_path, exist_ok=True)
@@ -68,13 +69,12 @@ class MutableSeeder:
         self.z_ses = zenoh.open(z_cfg)
 
         # mutable update
-        salt = "submaps"
         sk = SigningKey(bytes.fromhex(self.state["sk"]))
 
         self.mi = { 
         'pubkey' : sk.verify_key.encode(),
-        'salt' : salt,
-        'seq' : self.state['seq'][salt],
+        'robot_id' : robot_id,
+        'seq' : self.state['seq'],
         'infohash' : -1,
         'my_ip' : self.my_ip
         }
@@ -163,26 +163,38 @@ class MutableSeeder:
         wrote_idx = False
         # annotate each entry in the dictionary
         for i, file_entry in enumerate(torrent_dict[b"info"][b"files"]):
-            # if b"attr" in file_entry and b"p" in file_entry[b"attr"]: # skip padding files
-            #     continue
+            if b"attr" in file_entry and b"p" in file_entry[b"attr"]: # skip padding files
+                continue
+
             filename = file_entry[b"path"][-1].decode()
-            if wrote_idx == False:
-                idx = get_map_info(f"{self.input_path}/{filename}")
-                file_entry[b"x-idx"] = msgpack.packb(
-                    {"idx": idx_to_dict(idx)}, use_bin_type=True
+            target_file_path = f"{self.input_path}/{filename}"
+
+            if not os.path.exists(target_file_path) or os.path.getsize(target_file_path) == 0:
+                print(f"[snapshot] WARNING: Skipping empty or missing file {filename}")
+                continue
+
+            try:
+                if wrote_idx == False:
+                    idx = get_map_info(target_file_path)
+                    file_entry[b"x-idx"] = msgpack.packb(
+                        {"idx": idx_to_dict(idx)}, use_bin_type=True
+                    )
+                    wrote_idx = True
+
+                vertices, edges = parse_chunk(f"{self.input_path}/{filename}")
+                file_entry[b"x-vertices"] = msgpack.packb(
+                    [vertex_to_dict(v) for v in vertices], use_bin_type=True
                 )
-                wrote_idx = True
-
-            vertices, edges = parse_chunk(f"{self.input_path}/{filename}")
-            file_entry[b"x-vertices"] = msgpack.packb(
-                [vertex_to_dict(v) for v in vertices], use_bin_type=True
-            )
-            file_entry[b"x-edges"] = msgpack.packb(
-                [edge_to_dict(e) for e in edges], use_bin_type=True
-            )
-
+                file_entry[b"x-edges"] = msgpack.packb(
+                    [edge_to_dict(e) for e in edges], use_bin_type=True
+                )
+            except Exception as e:
+                print(f"[snapshot] ERROR parsing chunk {filename}: {e}. Skipping annotations for this file.")
+                continue
+            
         out_file = os.path.join(self.metadata_path, f"{self.posegraph}.torrent")
         ti = lt.torrent_info(torrent_dict)
+        self.bencoded_torrent_dict = lt.bencode(torrent_dict)
 
         with open(out_file, "wb") as f:
             f.write(lt.bencode(torrent_dict))
