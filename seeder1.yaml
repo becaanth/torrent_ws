@@ -1,0 +1,17 @@
+session_name: s1
+windows:
+  - window_name: seeder
+    layout: tiled
+    panes:
+      - shell_command:
+        # deconstitution
+          - source $VTRSRC/main/install/setup.bash
+          - export ROBOT_ID=1
+          - cd $VTRROOT/torrent_ws/scripts
+          - rm -r $VTRTEMP/pcs/utias/$ROBOT_ID
+          - python3 posegraph/live_deconstitution.py -p utias
+      - shell_command:
+        # mutable seeder
+          - source $VTRSRC/main/install/setup.bash
+          - cd $VTRROOT/torrent_ws/scripts
+          - python3 torrent/mutable_seeder.py -r 1

@@ -58,26 +58,26 @@ def sqlite_file_filter(file_path: str) -> bool:
     return True
 
 def mutable_to_string(mutable_item):
-    return f"\tkey: {mutable_item['pubkey']}\n \tsalt: {mutable_item['salt']} \n \tseq: {mutable_item['seq']} \n \tinfohash: {mutable_item['infohash']} \n \tmy IP: {mutable_item['my_ip']}"
+    return f"\tkey: {mutable_item['pubkey']}\n \trobot id: {mutable_item['robot_id']} \n \tseq: {mutable_item['seq']} \n \tinfohash: {mutable_item['infohash']} \n \tmy IP: {mutable_item['my_ip']}"
 
 # inspection
-def inspect_torrent(path):
-    raw = lt.bdecode(open(path, "rb").read())
-    info = raw[b"info"]
+def inspect_torrent(encoded_info):
+    # DEPRECATED:  if reading from path
+    # raw = lt.bdecode(open(path, "rb").read())
+    # info = raw[b"info"]
 
+    info = lt.bdecode(encoded_info)
+    
     # get MapInfo
     idx = msgpack.unpackb(info[b'files'][0][b'x-idx'], raw=False)
 
     pieces : list[Piece] = []
     for file_entry in info.get(b"files", []):
-        rel_path = "/".join(p.decode() for p in file_entry[b"path"])
-        size = file_entry[b"length"]
         extras = {
             k.decode(): v
             for k, v in file_entry.items()
             if k not in {b"length", b"path", b"attr", b"path.utf-8"}
         }
-        print(f"  {rel_path}  ({size} bytes)")
         if extras:
             raw_vertices = msgpack.unpackb(file_entry[b"x-vertices"], raw=False)
             raw_edges    = msgpack.unpackb(file_entry[b"x-edges"],    raw=False)
@@ -105,7 +105,7 @@ def on_mutable_item(sample):
     zenoh_item = msgpack.unpackb(bytes(sample.payload), raw=False)
     mutable_item = {
         'pubkey' : zenoh_item.get('pubkey'),
-        'salt' : 'submaps',
+        'robot_id' : zenoh_item.get('robot_id'),
         'seq' : zenoh_item.get('seq'),
         'infohash' : zenoh_item.get('infohash'),
         'my_ip' : zenoh_item.get('my_ip')
