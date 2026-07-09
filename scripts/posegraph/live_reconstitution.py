@@ -17,6 +17,7 @@ from vtr_common_msgs.msg import LieGroupTransform
 import contextlib
 import pdb
 
+# TODO: move away from metadata_path
 
 class Reconstitutor:
     """
@@ -48,6 +49,7 @@ class Reconstitutor:
         # topics we are reading from
         self.tables = ['vtr_index','env_info','waypoint_name','vertices','edges','pointmap','pointmap_ptr']
         self.master_data = {table: [] for table in self.tables}
+        self.topology = {}
 
         # topics we are writing to (+ pointmap_v0)
         self._db_relpaths = {
@@ -73,7 +75,7 @@ class Reconstitutor:
         }
 
         # make directories for VTR
-        print(f'[INIT]: self.output_dir: {self.output_dir}')
+        print(f'[Reconstitutor]: self.output_dir: {self.output_dir}')
         for key, topic in self.topics.items():
             if key == 'index': 
                 os.makedirs(f'{self.output_dir}/index', exist_ok=True)
@@ -101,13 +103,13 @@ class Reconstitutor:
 
     # ============= PUBLIC =================
     def run(self):
-        print(f"[Reconstitutor] polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
+        print(f"[Reconstitutor]: polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
         try:
             while True:
                 self._poll()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
-            print("\n[Reconstitutor] stopped.")
+            print("\n[Reconstitutor]: stopped.")
         finally:
             self._close()
 
@@ -133,7 +135,7 @@ class Reconstitutor:
             [f for f in os.listdir(self.metadata_path) if f.endswith('.torrent')]
         )
         if not self.metadata_files:
-            print('[ERROR]: no metadata')
+            print('[Reconstitutor]: ERROR no metadata')
             return
 
         # Rebuild pieces from metadata, preserving existing skeleton_rowids
@@ -186,7 +188,7 @@ class Reconstitutor:
                 # time.sleep(0.1) # ANTHONY - delay for dev
                 self.db_written.append(db_file)
             except:
-                print(f"Warning: Could not read from {db_file}")
+                print(f"[Reconstitutor]: WARNING Could not read from {db_file}")
                 continue
 
     def _parse_piece(self, db_file: pd.DataFrame):
@@ -203,7 +205,7 @@ class Reconstitutor:
                 df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
                 poll_data[table] = df
             except:
-                print(f"Warning: Could not read table {table} from {db_file}")
+                print(f"[Reconstitutor]: WARNING could not read table {table} from {db_file}")
                 poll_data[table] = pd.DataFrame() 
 
         conn.close()
@@ -215,7 +217,7 @@ class Reconstitutor:
         first_vid = inspect_ros_data(poll_data['vertices'].iloc[0]).id
         for i, piece in enumerate(self.pieces):
             if first_vid == piece.top_vertices[0].vertex_id:
-                print("[INGEST]: match found")
+                print("[Reconstitutor]: ingest found match")
                 self.pieces[i].vertices = poll_data['vertices']
                 self.pieces[i].edges = poll_data['edges']
                 self.pieces[i].pointmap = poll_data['pointmap']
@@ -246,7 +248,7 @@ class Reconstitutor:
 
             # reconnect to fresh file
             with self._open(k) as conn:
-                print(f'[INIT_DB]: {k} at {self._conns[k]}, topic {self.topics[k]}')
+                print(f'[Reconstitutor]: init db {k} at {self._conns[k]}, topic {self.topics[k]}')
             
                 conn.execute("""
                     CREATE TABLE topics (
@@ -272,7 +274,6 @@ class Reconstitutor:
                     VALUES (?, ?, ?, ?)
                 """, (k, self.topics[k], "cdr", ""))
                 self._last_rowid[k] = cur.lastrowid
-                print(f"[INIT_DB]: Initialized: {self._db_relpaths[k]} | topic_id={self.topics[k]}")
 
     def _write_metadata(self, piece: Piece):
         """
@@ -315,7 +316,7 @@ class Reconstitutor:
 
         piece.skeleton_rowids = rowids
         piece.metadata_written = True
-        print(f"_write_metadata: {time.time() - s}")
+        print(f"[Reconstitutor]: _write_metadata: {time.time() - s}")
 
 
     def _write_message(self, piece: Piece):
@@ -323,7 +324,6 @@ class Reconstitutor:
         Connect to existing conns and write messages
         """
         s = time.time()
-        print("[WRITE]")
         field_map = {
             'index':       'vtr_index',
             'pointmap_v0': 'pointmap',
@@ -336,7 +336,7 @@ class Reconstitutor:
             field = field_map.get(k, k)  # use mapped name if exists, else k itself
             df = getattr(piece, field)
             if df is None or df.empty:
-                print(f"[WRITE] Skipping '{k}': no data")
+                print(f"[Reconstitutor]: skipping '{k}': no data")
                 continue
             
             with self._open(k) as conn:
@@ -372,8 +372,6 @@ class Reconstitutor:
                 
                 conn.execute("COMMIT;")
 
-            print(f"_write_message: {time.time() - s}")
-
     def _write_index(self, index_msg):
         # write index.db3, containing MapInfo message
         map_info = MapInfo(
@@ -399,16 +397,10 @@ class Reconstitutor:
             """, (1, -1, s_graph)) # timestamp is -1 default            
             conn.execute("COMMIT;")
 
-
-    # ============= DEBUG ==================
-    def _plot_preview(self):
-        # TODO:
-        print('_plot_preview')
-
     # ============= CLEANUP ================
     def _close(self):
         # nothing to flush, each write closes its own connections
-        print("[Reconstitutor] connections closed.")
+        print("[Reconstitutor]: connections closed.")
 
 # +++++++++++++ HELPERS ++++++++++++++++
 def preview_piece(piece):
@@ -441,7 +433,7 @@ if __name__ == "__main__":
     piece_path = os.path.join(args.piece_root, args.posegraph)
     metadata_path = args.metadata
 
-    print(f'[MAIN]: output_dir: {output_dir}')
+    print(f'[Reconstitutor]: output_dir: {output_dir}')
     rec = Reconstitutor(
         pieces_path=piece_path,
         metadata_path=metadata_path,
