@@ -29,7 +29,7 @@ import pandas as pd
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from posegraph_utils import *
+from .posegraph_utils import *
 
 PIECE_SIZE = 2 * 1024 * 1024  # 2 MiB
 
@@ -133,7 +133,7 @@ class Deconstitutor:
         # index df read lazily on first successful connection
         self._index_df: pd.DataFrame | None = None
 
-        print(f"[Deconstitutor] initialized with output_dir: {output_dir}")
+        print(f"[Deconstitutor]: initialized with output_dir: {output_dir}")
 
     # ------------------------------------------------------------------
     # Public
@@ -147,17 +147,17 @@ class Deconstitutor:
         if not os.path.exists(full_path):
             return None
         self._conns[key] = sqlite3.connect(full_path, check_same_thread=False)
-        print(f"[Deconstitutor] opened {key}")
+        print(f"[Deconstitutor]: opened {key}")
         return self._conns[key]
 
     def run(self):
-        print(f"[Deconstitutor] polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
+        print(f"[Deconstitutor]: polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
         try:
             while True:
                 self._poll()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
-            print("\n[Deconstitutor] stopped.")
+            print("\n[Deconstitutor]: stopped.")
         finally:
             self._close()
 
@@ -174,7 +174,7 @@ class Deconstitutor:
                     self._index_df = _read_full_df(conn)
                     self._last_rowid['index'] = int(self._index_df['rowid'].max()) if len(self._index_df) else 0
                 except Exception as e:
-                    print(f"[Deconstitutor] index: not ready yet ({e})")
+                    print(f"[Deconstitutor]: index: not ready yet ({e})")
 
         self._ingest_new_rows('vertices',      self._parse_vertices)
         self._ingest_new_rows('edges',         self._parse_edges)
@@ -197,7 +197,7 @@ class Deconstitutor:
         try:
             new_rows = _read_new_rows(conn, self._last_rowid[key])
         except Exception as e:
-            print(f"[Deconstitutor] {key}: reconnecting ({e})")
+            print(f"[Deconstitutor]: {key}: reconnecting ({e})")
             try:
                 self._conns[key].close()
             except Exception:
@@ -218,7 +218,7 @@ class Deconstitutor:
         if parse_fn is not None:
             parse_fn(new_rows)
 
-        print(f"[Deconstitutor] {key}: +{len(new_rows)} rows "
+        print(f"[Deconstitutor]: {key}: +{len(new_rows)} rows "
               f"(total {len(self._df[key])})")
 
     # ------------------------------------------------------------------
@@ -329,7 +329,7 @@ class Deconstitutor:
 
             pad_file_to_exact_size(db_path, PIECE_SIZE)
             self._written_chunks.add(i)
-            print(f"[Deconstitutor] wrote chunk {str(hex(int(sid)))[2:].zfill(16)}.db3  (submap vertex_id={sid})")
+            print(f"[Deconstitutor]: wrote chunk {str(hex(int(sid)))[2:].zfill(16)}.db3  (submap vertex_id={sid})")
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -339,7 +339,7 @@ class Deconstitutor:
         for conn in self._conns.values():
             if conn is not None:
                 conn.close()
-        print("[Deconstitutor] connections closed.")
+        print("[Deconstitutor]: connections closed.")
 
 
 # ---------------------------------------------------------------------------

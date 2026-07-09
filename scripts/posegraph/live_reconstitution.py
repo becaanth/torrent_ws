@@ -3,23 +3,20 @@ import pandas as pd
 import os
 import time
 import argparse
-import pylgmath
-
-import pdb
 
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from posegraph_utils import *
-from torrent.torrent_utils import *
+from .posegraph_utils import *
+from torrent.torrent_utils import inspect_torrent
 
 from vtr_pose_graph_msgs.msg import Vertex, Edge, EdgeType, EdgeMode
 from vtr_pose_graph_msgs.msg import Graph, MapInfo
 from vtr_common_msgs.msg import LieGroupTransform
 
-from dataclasses import dataclass, field
-from typing import Optional
 import contextlib
+import pdb
+
 
 class Reconstitutor:
     """

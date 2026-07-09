@@ -9,7 +9,7 @@ import msgpack
 import argparse
 
 from posegraph.posegraph_utils import *
-from torrent_utils import *
+from .torrent_utils import *
 
 import pdb
 
@@ -98,7 +98,7 @@ class MutableSeeder:
             my_ip = ROBOT_IPS[params['container']]
             cfg = zenoh.Config.from_file(f"../warthog/hunter2_zenoh.json5")    
         else:
-            print('bad params/device')
+            print('[Seeder]: bad params/device')
 
         print(f"[unpack] my_ip {my_ip}")
         return my_ip, cfg
@@ -107,13 +107,13 @@ class MutableSeeder:
         """
         run the main loop
         """
-        print(f"[seeder] polling at {self.poll_hz} Hz (Ctrl-C to stop)")
+        print(f"[Seeder]: polling at {self.poll_hz} Hz (Ctrl-C to stop)")
         try: 
             while True:
                 self._poll()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
-            print("\n[seeder] stopped.")
+            print("\n[Seeder]: stopped.")
         finally:
             self.z_ses.close()
 
@@ -128,28 +128,28 @@ class MutableSeeder:
             ti = self.create_snapshot()
             infohash = ti.info_hash()
             handle = self.t_ses.add_torrent({"ti" : ti, "save_path" : os.path.dirname(self.input_path)})
-            print(f"[snapshot] created with hash {ti}")
+            print(f"[Seeder]: snapshot created with hash {ti}")
 
             # update mutable item
             self.mi['infohash'] = infohash.to_bytes()
             self.mi['seq']+=1
-            print(f"[zenoh] adding mutable item: {self.mi['infohash']}") #\n{mutable_to_string(mutable_item)}")
+            print(f"[Seeder]: seeding mutable item: \n{mutable_to_string(self.mi)}")
                 
         if self.start_flag:
             # pub gossip over Zenoh
-            print("[zenoh]: pub mutable item")
+            print("[Seeder]: pub mutable item")
             payload = msgpack.packb(self.mi, use_bin_type=True)
             self.z_ses.put(f"mutable_items/{self.robot_id}", payload)      
             handle = self.t_ses.get_torrents()[0]
             status = handle.status()
             
-            print(f"\tProgress: {status.progress*100:.1f}% | Peers: {status.num_peers} | Down: {status.download_rate/1000:.1f} KB/s")
+            print(f"\t[Seeder]: Progress: {status.progress*100:.1f}% | Peers: {status.num_peers} | Down: {status.download_rate/1000:.1f} KB/s")
 
     def create_snapshot(self):
         """
         Generate new .torrent for a directory
         """
-        print(f"[snapshot] input path : {self.input_path}")
+        print(f"[Seeder]: snapshot input path : {self.input_path}")
         fs = lt.file_storage()
         lt.add_files(fs, self.input_path, sqlite_file_filter) # filter removes -journal, -wal extensions
 
@@ -170,7 +170,7 @@ class MutableSeeder:
             target_file_path = f"{self.input_path}/{filename}"
 
             if not os.path.exists(target_file_path) or os.path.getsize(target_file_path) == 0:
-                print(f"[snapshot] WARNING: Skipping empty or missing file {filename}")
+                print(f"[Seeder]: snapshot WARNING: Skipping empty or missing file {filename}")
                 continue
 
             try:
@@ -189,7 +189,7 @@ class MutableSeeder:
                     [edge_to_dict(e) for e in edges], use_bin_type=True
                 )
             except Exception as e:
-                print(f"[snapshot] ERROR parsing chunk {filename}: {e}. Skipping annotations for this file.")
+                print(f"[Seeder]: snapshot ERROR parsing chunk {filename}: {e}. Skipping annotations for this file.")
                 continue
             
         out_file = os.path.join(self.metadata_path, f"{self.posegraph}.torrent")

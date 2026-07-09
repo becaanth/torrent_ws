@@ -6,7 +6,7 @@ from queue import Queue
 import os
 import argparse
 
-from torrent_utils import *
+from .torrent_utils import *
 
 import pdb
 
@@ -62,7 +62,6 @@ class MutablePeer:
         
         # mutable updates
         self.mutable_items = {}
-        self.topology = {}
 
         # inversion of control callbacks
         self.on_torrent_discovered = on_torrent_discovered # spawn MutableSeeder # TODO wire
@@ -92,22 +91,22 @@ class MutablePeer:
                 if key != params['robot_id']:
                     self.peers.append((ROBOT_IPS[key], 6881))
         else:
-            print("[unpack] bad params/device")
+            print("[Peer]: bad params/device")
 
-        print(f"[unpack] my_ip {my_ip}")
+        print(f"[Peer]: my_ip {my_ip}")
         return my_ip, cfg
 
     def run(self):
         """
         run the main loop
         """
-        print(f"[peer] running the main loop (Ctrl-C to stop)")
+        print(f"[Peer]: running the main loop (Ctrl-C to stop)")
         try:
             while True:
                 self._flush_queue()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
-            print("\n[peer] stopped")
+            print("\n[Peer]: stopped")
         finally:
             self.z_ses.close()
 
@@ -120,13 +119,13 @@ class MutablePeer:
             sample = self.message_queue.get()
             
             mutable_item = on_mutable_item(sample)
-            print(f"[on_mutable_item] received \n {mutable_to_string(mutable_item)}")
+            print(f"[Peer]: mutable item received \n {mutable_to_string(mutable_item)}")
 
             # check if new session discovered
             existing_ids = {mi['robot_id'] for keys, mi in self.mutable_items.items() if 'robot_id' in mi}
             robot_id = mutable_item['robot_id']
             if robot_id not in existing_ids:
-                print(f"[torrent]: new \n\t {mutable_to_string(mutable_item)}")
+                print(f"[Peer]: new \n\t {mutable_to_string(mutable_item)}")
                 self.mutable_items[robot_id] = mutable_item
                 handle = self.t_ses.add_torrent({
                     'info_hash': mutable_item['infohash'],
@@ -141,11 +140,15 @@ class MutablePeer:
                 info = handle.get_torrent_info()
                 metadata = info.metadata()
                 topology = inspect_torrent(metadata)
-                self.topology[robot_id] = topology
+                # self.topology[robot_id] = topology
+    
+                # orchestrator callbacks
+                self.on_metadata_received(robot_id, topology) # -> topology goes to Reconstitutor
+                self.on_torrent_discovered(robot_id)          # -> new session, spawn MutableSeeder
 
             # check if heard own seeder
             if mutable_item['my_ip'] == self.my_ip:
-                print(f"[flush]: skipping. don't leech own pieces")
+                print(f"[Peer]: WARNING flush skipping. don't leech own pieces")
                 return
             
             # if new infohash, remove old torrent session
@@ -153,7 +156,7 @@ class MutablePeer:
                 saved_mi = self.mutable_items[robot_id]
                 if mutable_item['seq'] > saved_mi['seq']: # what if we torrent a completed map? then these are equal
                     # overwrite mutable item
-                    print(f"[torrent]: overwrite \n\t {mutable_to_string(mutable_item)}")
+                    print(f"[Peer]: overwrite \n\t {mutable_to_string(mutable_item)}")
                     self.mutable_items[robot_id] = mutable_item
 
                     # remove old torrent
@@ -173,29 +176,22 @@ class MutablePeer:
                             info = handle.get_torrent_info()
                             metadata = info.metadata()
                             topology = inspect_torrent(metadata)
-                            print(f"[flush] updated topology")
-                            self.topology[robot_id] = topology
+                            print(f"[Peer] flush updated topology")
+
+                            # orchestrator callback
+                            self.on_metadata_received(robot_id, topology) # -> topology goes to Reconstitutor
 
         # Monitor existing torrents
-        print("monitoring")
         for handle in self.t_ses.get_torrents():
             s = handle.status()
-#  | progress: {s.progress*100:.1f}%"
+            print(f"[Peer]: progress {s.progress*100:.1f}%")
 
         for key, mi in self.mutable_items.items():
-            print(f"[mi] {mutable_to_string(mi)})")
+            print(f"[Peer]: item \n{mutable_to_string(mi)})")
                 
     def on_sample(self, sample):
-        print('[on_sample]: Received Zenoh message')
+        print('[Peer]: Received Zenoh message')
         self.message_queue.put(sample)
-
-    # orchestrator callbacks
-    def on_torrent_discovered():
-        pass
-
-    def on_metata_received():
-        pass
-
 
 # ======================================================
 
