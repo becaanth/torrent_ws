@@ -53,6 +53,7 @@ class Orchestrator:
         self.peer = MutablePeer(
             params=peer_params,
             state=state,
+            robot_id=robot_id,
             on_torrent_discovered=self.handle_torrent_discovered,
             on_metadata_received=self.handle_metadata_received
         )
