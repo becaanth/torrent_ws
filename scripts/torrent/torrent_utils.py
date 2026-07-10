@@ -18,7 +18,8 @@ ROBOT_IPS = {
 # Anthonys laptop
 DOCKER_IPS = {
     'torrent0':'172.18.0.2',
-    'torrent1':'172.18.0.3'
+    'torrent1':'172.18.0.3',
+    'torrent2':'172.18.0.2',
 }
 
 # -------------------------
@@ -54,8 +55,6 @@ def has_new_file(directory, last_count=[0]):
         tf = True
     else:
         tf = False
-
-    print(f'Is there a new file? {tf}')    
     return tf
 
 def sqlite_file_filter(file_path: str) -> bool:
@@ -80,7 +79,6 @@ def inspect_torrent(encoded_info):
     # DEPRECATED:  if reading from path
     # raw = lt.bdecode(open(path, "rb").read())
     # info = raw[b"info"]
-
     info = lt.bdecode(encoded_info)
     
     # get MapInfo

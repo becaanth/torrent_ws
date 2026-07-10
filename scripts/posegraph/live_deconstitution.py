@@ -91,7 +91,7 @@ class Deconstitutor:
         data/env_info/env_info_0.db3
     """
 
-    def __init__(self, input_dir: str, output_dir: str, robot_id: str, poll_hz: float = 1.0):
+    def __init__(self, input_dir: str, output_dir: str, robot_id, poll_hz: float = 1.0):
         self.input_dir   = input_dir
         self.robot_id = int(robot_id)
         self.output_dir = output_dir
@@ -167,6 +167,7 @@ class Deconstitutor:
 
     def _poll(self):
         """Read new rows from all sources, then write any new chunks."""
+        print(f"[Deconstitutor]: polling")
         if self._index_df is None:
             conn = self._get_conn('index')
             if conn is not None:
@@ -191,6 +192,7 @@ class Deconstitutor:
         and call parse_fn to update decoded id arrays.
         Silently skips if the file does not exist yet or the schema isn't ready.
         """
+        # print(f"[Deconstitutor]: ingesting {key}")
         conn = self._get_conn(key)
         if conn is None:
             return
@@ -218,8 +220,8 @@ class Deconstitutor:
         if parse_fn is not None:
             parse_fn(new_rows)
 
-        print(f"[Deconstitutor]: {key}: +{len(new_rows)} rows "
-              f"(total {len(self._df[key])})")
+        # print(f"[Deconstitutor]: {key}: +{len(new_rows)} rows "
+        #       f"(total {len(self._df[key])})")
 
     # ------------------------------------------------------------------
     # Internal — id array updaters (mirrors get_db3_elements decoding)
@@ -257,6 +259,8 @@ class Deconstitutor:
         For each submap not yet written, check if we have enough data
         to write its chunk and write it if so.
         """
+        # print(f"[Deconstitutor]: writing new chunks")
+
         for i, sid in enumerate(self._submap_ids[:-1]):
             if i in self._written_chunks:
                 continue

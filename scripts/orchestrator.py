@@ -24,9 +24,9 @@ class Orchestrator:
     def __init__(self, seeder_params: dict, peer_params: dict, state:dict, robot_id: int, posegraph: str):
         VTRTEMP = os.getenv("VTRTEMP")
         source_pg = f"{VTRTEMP}/pgs/{posegraph}/graph" # input posegraph to dec
-        source_pc = f"{VTRTEMP}/pcs/{posegraph}/{robot_id}" # output pieces
-        rcv_pc = f"{VTRTEMP}/torrent_pcs/{posegraph}/{robot_id}" # received pieces
-        rcv_pg = f"{VTRTEMP}/pgs/r{posegraph}" # output posegraph from rec
+        source_pc = f"{VTRTEMP}/pcs/{posegraph}_{robot_id}/{robot_id}" # output pieces
+        rcv_pc = f"{VTRTEMP}/pcs/{posegraph}_{robot_id}" # received pieces
+        rcv_pg = f"{VTRTEMP}/pgs/r{posegraph}_{robot_id}/graph" # output posegraph from rec
         self.robot_id = robot_id
 
         print(f"[orch] init with id {robot_id}, posegraph {posegraph}")
@@ -62,13 +62,14 @@ class Orchestrator:
         self.topology = {}
         self.rec = Reconstitutor(
             pieces_path=rcv_pc,
-            metadata_path="/home/asrl/ASRL/vtr3/torrent_ws/scripts/torrent/metadata", # TODO: pass in torrect_dict live
+            robot_id=self.robot_id,
             output_dir=rcv_pg
         )
 
     def handle_metadata_received(self, robot_id, topology):
         # topology update, pass to reconstitutor (cb from mutable_peer)
         print(f"[orch] handle_metadata_received for id {robot_id}")
+        print(f"[orch] handle_metadata_received topology is type {type(topology)}")
         self.topology[robot_id] = topology
         self.rec.update_topology(robot_id, topology)
 
@@ -85,13 +86,13 @@ class Orchestrator:
     def run(self):
         logging.info("[agent.run]")
         dec_thread = threading.Thread(target=self.dec.run, daemon=True)
+        dec_thread.start()
         seed_thread = threading.Thread(target=self.fleet[self.robot_id].run, daemon=True)
+        seed_thread.start()
         peer_thread = threading.Thread(target=self.peer.run, daemon=True)
+        peer_thread.start()
         rec_thread  = threading.Thread(target=self.rec.run, daemon=True)
 
-        dec_thread.start()
-        seed_thread.start()
-        peer_thread.start()
         rec_thread.start()
 
         dec_thread.join()

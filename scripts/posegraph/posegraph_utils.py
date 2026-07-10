@@ -15,7 +15,7 @@ def inspect_ros_data(frame):
     return msg
 
 def pad_file_to_exact_size(path, target_size):
-    # IMPORTANT: stat AFTER sqlite connection is closed
+    # IMPORTANT: start AFTER sqlite connection is closed
     current_size = os.path.getsize(path)
 
     if current_size > target_size:
@@ -25,6 +25,7 @@ def pad_file_to_exact_size(path, target_size):
 
     missing = target_size - current_size
     if missing == 0:
+        print("map size == padding")
         return
 
     with open(path, "ab") as f:
@@ -35,6 +36,7 @@ def pad_file_to_exact_size(path, target_size):
     assert final_size == target_size, (
         f"padding failed: {final_size} != {target_size}"
     )
+
 
 # getters
 def get_db3_elements(bag_path, which_data):

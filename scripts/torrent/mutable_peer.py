@@ -14,7 +14,7 @@ class MutablePeer:
     """
     Listen to Zenoh gossip, join a torrent session
     """
-    def __init__(self, params : dict, state : dict, robot_id, poll_hz : float = 0.5,
+    def __init__(self, params : dict, state : dict, robot_id, poll_hz : float = 0.1,
                  on_torrent_discovered=None, on_metadata_received=None):
         
         # robot params
@@ -22,13 +22,14 @@ class MutablePeer:
         self.peers = []
         self.my_ip, z_cfg = unpack_device(params, robot_id)
         self.router = params['router']
+        self.robot_id = robot_id
 
         # data params
         self.posegraph = params['posegraph']
         self.state = state
 
         # file system
-        self.output_path = f"{os.getenv('VTRTEMP')}/torrent_pcs/{self.posegraph}"
+        self.output_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}_{self.robot_id}"
         os.makedirs(self.output_path, exist_ok=True)
 
         # libtorrent
@@ -84,6 +85,11 @@ class MutablePeer:
             mutable_item = on_mutable_item(sample)
             print(f"[Peer]: mutable item received \n {mutable_to_string(mutable_item)}")
 
+            # check if heard own seeder
+            if mutable_item['robot_id'] == self.robot_id:
+                print(f"[Peer]: WARNING flush skipping. don't leech own pieces")
+                return
+            
             # check if new session discovered
             existing_ids = {mi['robot_id'] for keys, mi in self.mutable_items.items() if 'robot_id' in mi}
             robot_id = mutable_item['robot_id']
@@ -99,13 +105,8 @@ class MutablePeer:
 
                 # orchestrator callbacks
                 if self.on_torrent_discovered is not None:
-                    self.on_torrent_discovered(robot_id)          # -> new session, spawn MutableSeeder
+                    self.on_torrent_discovered(robot_id) # -> new session, spawn MutableSeeder
 
-            # check if heard own seeder
-            if mutable_item['my_ip'] == self.my_ip:
-                print(f"[Peer]: WARNING flush skipping. don't leech own pieces")
-                return
-            
             # if new infohash, remove old torrent session
             else:
                 saved_mi = self.mutable_items[robot_id]
@@ -117,6 +118,9 @@ class MutablePeer:
                     # remove old torrent
                     for active_handle in self.t_ses.get_torrents():
                         print(f"DEBUG [Peer]: active_handle {active_handle.get_torrent_info()}")
+                        if active_handle is None:
+                            return 
+                        
                         if active_handle.get_torrent_info().info_hash().to_bytes() == saved_mi['infohash']:
                             self.t_ses.remove_torrent(active_handle)
                             handle = self.t_ses.add_torrent({
@@ -144,7 +148,6 @@ class MutablePeer:
                 # get torrent info (metadata)
                 info = handle.get_torrent_info()
                 metadata = info.metadata()
-                topology = inspect_torrent(metadata)
 
                 # find associated robot_id
                 infohash = info.info_hash().to_bytes()
@@ -155,8 +158,8 @@ class MutablePeer:
 
                 # orchestrator callback
                 if self.on_metadata_received is not None:
-                    self.on_metadata_received(robot_id, topology) # -> topology goes to Reconstitutor
-                    print(f"[Peer] poll_metadata updated topology for robot {robot_id}")
+                    self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
+                    print(f"[Peer] poll_metadata updated for robot {robot_id}")
 
     def on_sample(self, sample):
         print('[Peer]: Received Zenoh message')

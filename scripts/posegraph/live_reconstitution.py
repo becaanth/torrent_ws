@@ -17,8 +17,6 @@ from vtr_common_msgs.msg import LieGroupTransform
 import contextlib
 import pdb
 
-# TODO: move away from metadata_path
-
 class Reconstitutor:
     """
     Maintains a persistent connection to all submap-wise .db3 pieces and polls for new files at a fixed rate
@@ -39,12 +37,12 @@ class Reconstitutor:
         data/env_info/env_info_0.db3
     """
 
-    def __init__(self, pieces_path: str, metadata_path: str, output_dir: str, poll_hz: float = 1.0):
+    def __init__(self, pieces_path: str, output_dir: str, robot_id, poll_hz: float = 1.0):
+        self.robot_id = robot_id
         self.pieces_path = pieces_path
-        self.metadata_path = metadata_path
         self.output_dir = output_dir
         self.poll_hz = poll_hz
-        os.makedirs(f'{output_dir}', exist_ok=True)
+        os.makedirs(f'{self.output_dir}', exist_ok=True)
 
         # topics we are reading from
         self.tables = ['vtr_index','env_info','waypoint_name','vertices','edges','pointmap','pointmap_ptr']
@@ -53,14 +51,14 @@ class Reconstitutor:
 
         # topics we are writing to (+ pointmap_v0)
         self._db_relpaths = {
-                'vertices'     : f'{output_dir}/vertices/vertices_0.db3',
-                'edges'        : f'{output_dir}/edges/edges_0.db3',
-                'index'        : f'{output_dir}/index/index_0.db3',
-                'pointmap'     : f'{output_dir}/data/pointmap/pointmap_0.db3',
-                'pointmap_v0'  : f'{output_dir}/data/pointmap_v0/pointmap_v0_0.db3',
-                'pointmap_ptr' : f'{output_dir}/data/pointmap_ptr/pointmap_ptr_0.db3',
-                'waypoint_name': f'{output_dir}/data/waypoint_name/waypoint_name_0.db3',
-                'env_info'     : f'{output_dir}/data/env_info/env_info_0.db3'
+                'vertices'     : f'{self.output_dir}/vertices/vertices_0.db3',
+                'edges'        : f'{self.output_dir}/edges/edges_0.db3',
+                'index'        : f'{self.output_dir}/index/index_0.db3',
+                'pointmap'     : f'{self.output_dir}/data/pointmap/pointmap_0.db3',
+                'pointmap_v0'  : f'{self.output_dir}/data/pointmap_v0/pointmap_v0_0.db3',
+                'pointmap_ptr' : f'{self.output_dir}/data/pointmap_ptr/pointmap_ptr_0.db3',
+                'waypoint_name': f'{self.output_dir}/data/waypoint_name/waypoint_name_0.db3',
+                'env_info'     : f'{self.output_dir}/data/env_info/env_info_0.db3'
             }
 
         self.topics = {
@@ -115,7 +113,7 @@ class Reconstitutor:
 
     def update_topology(self, robot_id, topology):
         print(f"[Reconstitutor]: updating topology for robot {robot_id}")
-        self.topology[robot_id] = topology
+        self.topology[str(robot_id)] = topology
 
     # ============= PRIVATE ================
     @contextlib.contextmanager
@@ -135,87 +133,126 @@ class Reconstitutor:
         Read new deconstructed data, metadata
         """
         # TODO: refactor =================
-        # get files
-        if not self.topology:
-            print('[Reconstitutor]: ERROR no metadata')
-            return
+        if self.topology:
+            existing = {p.top_vertices[0].vertex_id: p for p in self.pieces}
+            new_pieces = []
+            for r_id, topo in self.topology.items():
+                # dont need topology for pieces this robot made
+                if r_id == self.robot_id:
+                    continue
+                
+                pieces, idx = inspect_torrent(topo)
+                if not self._index_written: # write MapInfo
+                    self._write_index(idx)
+                    self._index_written = True    
 
-        # Rebuild pieces from metadata, preserving existing skeleton_rowids
-        existing = {p.top_vertices[0].vertex_id: p for p in self.pieces}
-        new_pieces = []
-        for robot_id, topology in self.topology.items():
-            pieces, idx = self._parse_metadata(topology)
-            if not self._index_written: # write MapInfo
-                self._write_index(idx)
-                self._index_written = True    
-
-            for piece in pieces:
-                vid = piece.top_vertices[0].vertex_id
-                if vid in existing:
-                    new_pieces.append(existing[vid])  # preserve rowids
-                else:
-                    new_pieces.append(piece)
-        self.pieces = new_pieces
+                for piece in pieces:
+                    vid = piece.top_vertices[0].vertex_id
+                    if vid in existing:
+                        new_pieces.append(existing[vid])  # preserve rowids
+                    else:
+                        new_pieces.append(piece)
+            self.pieces = new_pieces
       
-        # Write metadata skeletons for any piece not yet written
-        for piece in self.pieces:
-            if not piece.metadata_written:  # empty dict = not yet written
-                # time.sleep(0.01) # ANTHONY - delay for dev
-                self._write_metadata(piece)
-        
-        # =====================================================
+            # Write metadata skeletons for any piece not yet written
+            for piece in self.pieces:
+                if not piece.metadata_written:  # empty dict = not yet written
+                    # time.sleep(0.01) # ANTHONY - delay for dev
+                    self._write_metadata(piece)
 
-        # TODO: this will have to be live instead of written-to .torrents
+        # go through local chunks
+        if not os.path.exists(self.pieces_path):
+            return
+        
+
         robot_subfolders = [f.path for f in os.scandir(self.pieces_path) if f.is_dir()]
-        db_files = []
         for robot_subfolder in robot_subfolders:
-            db_files.extend(sorted(
+            folder_name = os.path.basename(robot_subfolder)
+
+            db_files=sorted(
                 [f for f in os.listdir(robot_subfolder) if f.endswith('.db3')],
                 key=lambda x: int(x.split('.')[0], 16)
-            ))
+            )
+            
+            for db_file in db_files:
+                if db_file in self.db_written:
+                    continue
 
-        self.db_files = db_files
+                try:
+                    poll_data = self._parse_piece(folder_name, db_file)
 
-        if not self.db_files:
-            return
-        
-        # get data from self.db_files
-        for db_file in self.db_files:
-            if db_file in self.db_written:
-                continue
+                    # if THIS robot's pieces
+                    if folder_name == self.robot_id:
+                        self._ingest_local_piece(poll_data)
+                        print(f"[Reconstitutor]: ingest local piece {db_file}")
 
-            try:
-                poll_data = self._parse_piece(db_file)
-                self._ingest_piece(poll_data)
-                # time.sleep(0.1) # ANTHONY - delay for dev
-                self.db_written.append(db_file)
-            except:
-                print(f"[Reconstitutor]: WARNING Could not read from {db_file}")
-                continue
+                    else:
+                        if not self.pieces:
+                            continue # wait for metadata
+                        self._ingest_remote_piece(poll_data)
+                        print(f"[Reconstitutor]: ingest remote piece {db_file}")
 
-    def _parse_piece(self, db_file: pd.DataFrame):
+                    self.db_written.append(db_file)
+                except:
+                    print(f"[Reconstitutor]: WARNING Could not read from {db_file}")
+                    continue
+
+    def _parse_piece(self, folder_path: str, db_file: pd.DataFrame):
         """
         Read from a submap-wise .db3
         """
+
         poll_data = {}
-        submap_id = int(db_file[:-4],16)
-        robot_id = extract_robot_id(submap_id)
-        conn = sqlite3.connect(os.path.join(f"{self.pieces_path}/{robot_id}", db_file), isolation_level=None)
+        db_path = os.path.join(self.pieces_path, folder_path, db_file)
+        conn = sqlite3.connect(db_path, isolation_level=None)
 
         for table in self.tables:
             try:
                 df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
                 poll_data[table] = df
             except:
-                print(f"[Reconstitutor]: WARNING could not read table {table} from {db_file}")
+                print(f"[Reconstitutor]: _parse_piece exception")
                 poll_data[table] = pd.DataFrame() 
 
         conn.close()
-
         return poll_data
     
-    def _ingest_piece(self, poll_data: pd.DataFrame):
+    def _ingest_local_piece(self, poll_data: dict):
+        """Writes rows directly using standard INSERT statements bypassing skeleton mappings."""
+        s = time.time()
+        field_map = {'index': 'vtr_index', 'pointmap_v0': 'pointmap'}
+        
+        for k in self._db_relpaths:
+            if k == 'index' and not self._index_written:
+                try:
+                    self._write_index(poll_data.get('index'))
+                except:
+                    pass
+                continue
+            
+            field = field_map.get(k, k)
+            df = poll_data.get(field)
+            if df is None or df.empty:
+                continue
+                
+            with self._open(k) as conn:
+                conn.execute("BEGIN;")
+                conn.executemany("""
+                    INSERT INTO messages (topic_id, timestamp, data)
+                    VALUES (?, ?, ?)
+                """, [
+                    (self._last_rowid[k], int(row['timestamp']), row['data'])
+                    for _, row in df.iterrows()
+                ])
+                conn.execute("COMMIT;")
+        print(f"[Reconstitutor]: Direct Local Ingestion Complete: {time.time() - s:.4f}s")
+
+    def _ingest_remote_piece(self, poll_data: pd.DataFrame):
         # take poll_data, fill relevant Piece
+        if poll_data['vertices'].empty:
+            return
+        
+
         first_vid = inspect_ros_data(poll_data['vertices'].iloc[0]).id
         for i, piece in enumerate(self.pieces):
             if first_vid == piece.top_vertices[0].vertex_id:
@@ -230,11 +267,6 @@ class Reconstitutor:
                 self.pieces[i].env_info = poll_data['env_info']
                 self._write_message(self.pieces[i])
                 self.pieces[i].metadata_written = True
-
-    def _parse_metadata(self, metadata):
-        pieces, idx = inspect_torrent(metadata)
-        # create piece with topology preview
-        return pieces, idx
         
     # ============ .db3 INTERFACE ==============
     def _init_database(self):
@@ -331,6 +363,7 @@ class Reconstitutor:
             'pointmap_v0': 'pointmap',
         }
         skeleton_keys = {'vertices', 'edges'}
+
         for k in self._db_relpaths:
             if k == 'index':
                 continue
@@ -346,12 +379,9 @@ class Reconstitutor:
                 if k in skeleton_keys:
                     rowids = piece.skeleton_rowids.get(k)
                     if not rowids:
-                        print(f"[WRITE] ERROR: no skeleton rowids for {k} - skipping to avoid duplicates")
                         conn.execute("ROLLBACK;")
                         continue
                     if len(rowids) != len(df):
-                        print(f"[WRITE] ERROR: skeleton/data length mismatch for '{k}': "
-                        f"{len(rowids)} skeleton rows vs {len(df)} data rows — skipping")
                         conn.execute("ROLLBACK;")
                         continue
                     # Fill in the NULL skeletons in order
@@ -373,6 +403,7 @@ class Reconstitutor:
                     ])
                 
                 conn.execute("COMMIT;")
+                print(f"[Reconstitutor]: _write_message: {time.time() - s}")
 
     def _write_index(self, index_msg):
         # write index.db3, containing MapInfo message
@@ -424,21 +455,20 @@ def preview_piece(piece):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = 'Script to deconstruct posegraphs submap-wise')
     parser.add_argument('-p', '--posegraph', default='none', help="The name of the posegraph") # TODO: watch deconstructed dir generally
-    parser.add_argument('-m', '--metadata', type=str, default='/home/asrl/ASRL/vtr3/torrent_ws/scripts/torrent/metadata', help="")
     parser.add_argument('--poll_hz', type=float, default=1.0)
     parser.add_argument('--posegraph_root', default='/home/asrl/ASRL/vtr3/temp/pgs')
     parser.add_argument('--piece_root', default='/home/asrl/ASRL/vtr3/temp/pcs')
     args = parser.parse_args()
     posegraph = args.posegraph
+    robot_id = os.getenv("ROBOT_ID")
 
     output_dir = os.path.join(args.posegraph_root, f"r{posegraph}", 'graph')
     piece_path = os.path.join(args.piece_root, args.posegraph)
-    metadata_path = args.metadata
 
     print(f'[Reconstitutor]: output_dir: {output_dir}')
     rec = Reconstitutor(
         pieces_path=piece_path,
-        metadata_path=metadata_path,
+        robot_id=robot_id,
         output_dir=output_dir,
         poll_hz=args.poll_hz,
     )

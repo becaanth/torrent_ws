@@ -23,7 +23,7 @@ class MutableSeeder:
     1) update Zenoh discovery messages and broadcast
     2) seed the immutable snapshots
     """
-    def __init__(self, params : dict, robot_id : int, state : dict, poll_hz : float = 0.5):
+    def __init__(self, params : dict, robot_id : int, state : dict, poll_hz : float = 0.2):
         # robot params
         self.container = params['container']
         self.my_ip, z_cfg = unpack_device(params, robot_id)
@@ -35,11 +35,9 @@ class MutableSeeder:
         self.state = state
 
         # file system
-        self.input_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}/{self.robot_id}"
+        self.input_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}_{self.robot_id}/{self.robot_id}"
         self.bencoded_torrent_dict = {}
-        self.metadata_path = "scripts/torrent/metadata"
         os.makedirs(self.input_path, exist_ok=True)
-        os.makedirs(self.metadata_path, exist_ok=True)
     
         # libtorrent
         self.t_ses = lt.session({
@@ -159,12 +157,8 @@ class MutableSeeder:
                 print(f"[Seeder]: snapshot ERROR parsing chunk {filename}: {e}. Skipping annotations for this file.")
                 continue
             
-        out_file = os.path.join(self.metadata_path, f"{self.posegraph}.torrent")
         ti = lt.torrent_info(torrent_dict)
         self.bencoded_torrent_dict = lt.bencode(torrent_dict)
-
-        with open(out_file, "wb") as f:
-            f.write(lt.bencode(torrent_dict))
 
         return ti
 
