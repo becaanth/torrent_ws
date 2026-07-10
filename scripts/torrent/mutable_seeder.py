@@ -15,19 +15,6 @@ import pdb
 
 # zenohd --cfg 'scouting/multicast/enabled:false'
 
-# DEVICE CONFIGS
-ROBOT_IPS = {
-    'mr_green':'192.168.2.42',
-    'prof_plum':'192.168.3.42',
-    'col_mustard':'192.168.4.42',
-    'mrs_peacock':'192.168.5.42' 
-}
-
-# Anthonys laptop
-DOCKER_IPS = {
-    'torrent':'172.18.0.2',
-    'torrent1':'172.18.0.3'
-}
 
 class MutableSeeder:
     """
@@ -39,7 +26,7 @@ class MutableSeeder:
     def __init__(self, params : dict, robot_id : int, state : dict, poll_hz : float = 0.5):
         # robot params
         self.container = params['container']
-        self.my_ip, z_cfg = self.unpack_device(params)
+        self.my_ip, z_cfg = unpack_device(params, robot_id)
         self.router = params['router']
 
         # data params
@@ -82,26 +69,6 @@ class MutableSeeder:
         # etc
         self.poll_hz = poll_hz
         self.start_flag = False
-
-    def unpack_device(self, params : dict):
-        """
-        Load IPs, Zenoh config, robot names according to a config
-        """
-        d = params['device']
-
-        if d == 'docker':
-            my_ip = DOCKER_IPS[params['container']]
-            cfg = zenoh.Config()
-            tcp = '["tcp/'+ params['router'] + ':7447"]'
-            cfg.insert_json5("connect/endpoints", tcp)
-        elif d == 'hunter':
-            my_ip = ROBOT_IPS[params['container']]
-            cfg = zenoh.Config.from_file(f"../warthog/hunter2_zenoh.json5")    
-        else:
-            print('[Seeder]: bad params/device')
-
-        print(f"[unpack] my_ip {my_ip}")
-        return my_ip, cfg
 
     def run(self):
         """

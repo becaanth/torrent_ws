@@ -4,7 +4,22 @@ import json
 import msgpack
 import pprint
 import libtorrent as lt
+import zenoh
 from posegraph.posegraph_utils import *
+
+# DEVICE CONFIGS
+ROBOT_IPS = {
+    'mr_green':'192.168.2.42',
+    'prof_plum':'192.168.3.42',
+    'col_mustard':'192.168.4.42',
+    'mrs_peacock':'192.168.5.42' 
+}
+
+# Anthonys laptop
+DOCKER_IPS = {
+    'torrent0':'172.18.0.2',
+    'torrent1':'172.18.0.3'
+}
 
 # -------------------------
 # Persistence
@@ -112,3 +127,23 @@ def on_mutable_item(sample):
     }
 
     return mutable_item
+
+def unpack_device(params : dict, robot_id):
+    """
+    Load IPs, Zenoh config, robot names according to a config
+    """
+    d = params['device']
+
+    if d == 'docker':
+        my_ip = DOCKER_IPS[f"torrent{robot_id}"]
+        cfg = zenoh.Config()
+        tcp = '["tcp/'+ params['router'] + ':7447"]'
+        cfg.insert_json5("connect/endpoints", tcp)
+    elif d == 'hunter':
+        my_ip = ROBOT_IPS[params['container']]
+        cfg = zenoh.Config.from_file(f"../warthog/hunter2_zenoh.json5")    
+    else:
+        print('unpack device: bad params/device')
+
+    print(f"[unpack] my_ip {my_ip}")
+    return my_ip, cfg

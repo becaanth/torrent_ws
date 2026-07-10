@@ -10,30 +10,17 @@ from .torrent_utils import *
 
 import pdb
 
-ROBOT_IPS = {
-    'mr_green':'192.168.2.42',
-    'prof_plum':'192.168.3.42',
-    'col_mustard':'192.168.4.42',
-    'mrs_peacock':'192.168.5.42' 
-}
-
-# Anthonys laptop
-DOCKER_IPS = {
-    'torrent':'172.18.0.2',
-    'torrent1':'172.18.0.3'
-}
-
 class MutablePeer:
     """
     Listen to Zenoh gossip, join a torrent session
     """
-    def __init__(self, params : dict, state : dict, poll_hz : float = 0.5,
+    def __init__(self, params : dict, state : dict, robot_id, poll_hz : float = 0.5,
                  on_torrent_discovered=None, on_metadata_received=None):
         
         # robot params
         self.container = params['container']
         self.peers = []
-        self.my_ip, z_cfg = self.unpack_device(params)
+        self.my_ip, z_cfg = unpack_device(params, robot_id)
         self.router = params['router']
 
         # data params
@@ -70,32 +57,6 @@ class MutablePeer:
         # etc
         self.poll_hz = poll_hz
 
-    def unpack_device(self, params : dict):
-        """
-        Load IPs, Zenoh config, robot names according to a config
-        """
-        d = params['device']
-
-        if d == 'docker':
-            my_ip = DOCKER_IPS[params['container']]
-            cfg = zenoh.Config()
-            tcp = '["tcp/'+ params['router'] + ':7447"]'
-            cfg.insert_json5("connect/endpoints", tcp)
-            for key in DOCKER_IPS.keys():
-                if key != params['container']:
-                    self.peers.append((DOCKER_IPS[key], 6881))
-        elif d == 'hunter':
-            my_ip = ROBOT_IPS[params['container']]
-            cfg = zenoh.Config.from_file(f"../warthog/hunter2_zenoh.json5")    
-            for key in ROBOT_IPS.keys():
-                if key != params['robot_id']:
-                    self.peers.append((ROBOT_IPS[key], 6881))
-        else:
-            print("[Peer]: bad params/device")
-
-        print(f"[Peer]: my_ip {my_ip}")
-        return my_ip, cfg
-
     def run(self):
         """
         run the main loop
@@ -103,7 +64,9 @@ class MutablePeer:
         print(f"[Peer]: running the main loop (Ctrl-C to stop)")
         try:
             while True:
+                print(f"[Peer]: len queue = {self.message_queue.qsize()}")
                 self._flush_queue()
+                self._poll_metadata()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
             print("\n[Peer]: stopped")
@@ -134,17 +97,9 @@ class MutablePeer:
                 for ip, p in self.peers:
                     handle.connect_peer((ip, p))
 
-                while (not handle.has_metadata()):
-                    time.sleep(0.01)
-
-                info = handle.get_torrent_info()
-                metadata = info.metadata()
-                topology = inspect_torrent(metadata)
-                # self.topology[robot_id] = topology
-    
                 # orchestrator callbacks
-                self.on_metadata_received(robot_id, topology) # -> topology goes to Reconstitutor
-                self.on_torrent_discovered(robot_id)          # -> new session, spawn MutableSeeder
+                if self.on_torrent_discovered is not None:
+                    self.on_torrent_discovered(robot_id)          # -> new session, spawn MutableSeeder
 
             # check if heard own seeder
             if mutable_item['my_ip'] == self.my_ip:
@@ -161,6 +116,7 @@ class MutablePeer:
 
                     # remove old torrent
                     for active_handle in self.t_ses.get_torrents():
+                        print(f"DEBUG [Peer]: active_handle {active_handle.get_torrent_info()}")
                         if active_handle.get_torrent_info().info_hash().to_bytes() == saved_mi['infohash']:
                             self.t_ses.remove_torrent(active_handle)
                             handle = self.t_ses.add_torrent({
@@ -170,17 +126,6 @@ class MutablePeer:
                             for ip, p in self.peers:
                                 handle.connect_peer((ip, p))
 
-                            while (not handle.has_metadata()):
-                                time.sleep(0.01)
-
-                            info = handle.get_torrent_info()
-                            metadata = info.metadata()
-                            topology = inspect_torrent(metadata)
-                            print(f"[Peer] flush updated topology")
-
-                            # orchestrator callback
-                            self.on_metadata_received(robot_id, topology) # -> topology goes to Reconstitutor
-
         # Monitor existing torrents
         for handle in self.t_ses.get_torrents():
             s = handle.status()
@@ -188,7 +133,31 @@ class MutablePeer:
 
         for key, mi in self.mutable_items.items():
             print(f"[Peer]: item \n{mutable_to_string(mi)})")
-                
+
+    def _poll_metadata(self):
+        """
+        torrent sessions don;t immediately have metadata available.
+        waiting in flush_queue blocks the thread
+        """
+        for handle in self.t_ses.get_torrents():
+            if handle.has_metadata():
+                # get torrent info (metadata)
+                info = handle.get_torrent_info()
+                metadata = info.metadata()
+                topology = inspect_torrent(metadata)
+
+                # find associated robot_id
+                infohash = info.info_hash().to_bytes()
+                for rid, mi in self.mutable_items.items():
+                    if mi['infohash']==infohash:
+                        robot_id = rid
+                        break
+
+                # orchestrator callback
+                if self.on_metadata_received is not None:
+                    self.on_metadata_received(robot_id, topology) # -> topology goes to Reconstitutor
+                    print(f"[Peer] poll_metadata updated topology for robot {robot_id}")
+
     def on_sample(self, sample):
         print('[Peer]: Received Zenoh message')
         self.message_queue.put(sample)
@@ -212,6 +181,7 @@ if __name__ == "__main__":
     mutable_peer = MutablePeer(
         params=params,
         state=state,
+        robot_id=robot_id,
         poll_hz=args.poll_hz
     )
     mutable_peer.run()
