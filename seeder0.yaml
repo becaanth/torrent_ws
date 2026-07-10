@@ -9,9 +9,9 @@ windows:
           - export ROBOT_ID=0
           - cd $VTRROOT/torrent_ws/scripts
           - rm -r $VTRTEMP/pcs/utias/0
-          - python3 posegraph/live_deconstitution.py -p utias
+          - python3 -m posegraph.live_deconstitution -p utias
       - shell_command:
         # mutable seeder
           - source $VTRSRC/main/install/setup.bash
           - cd $VTRROOT/torrent_ws/scripts
-          - python3 torrent/mutable_seeder.py -r 0
+          - python3 -m torrent.mutable_seeder -r 0
