@@ -113,6 +113,10 @@ class Reconstitutor:
         finally:
             self._close()
 
+    def update_topology(self, robot_id, topology):
+        print(f"[Reconstitutor]: updating topology for robot {robot_id}")
+        self.topology[robot_id] = topology
+
     # ============= PRIVATE ================
     @contextlib.contextmanager
     def _open(self, key):
@@ -130,23 +134,20 @@ class Reconstitutor:
         """
         Read new deconstructed data, metadata
         """
+        # TODO: refactor =================
         # get files
-        self.metadata_files = sorted(
-            [f for f in os.listdir(self.metadata_path) if f.endswith('.torrent')]
-        )
-        if not self.metadata_files:
+        if not self.topology:
             print('[Reconstitutor]: ERROR no metadata')
             return
 
         # Rebuild pieces from metadata, preserving existing skeleton_rowids
         existing = {p.top_vertices[0].vertex_id: p for p in self.pieces}
         new_pieces = []
-        for metadata_file in self.metadata_files:
-            fname = os.path.join(self.metadata_path, metadata_file)
-            pieces, idx = self._parse_metadata(fname)
+        for robot_id, topology in self.topology.items():
+            pieces, idx = self._parse_metadata(topology)
             if not self._index_written: # write MapInfo
                 self._write_index(idx)
-                self._index_written = True            
+                self._index_written = True    
 
             for piece in pieces:
                 vid = piece.top_vertices[0].vertex_id
@@ -162,7 +163,8 @@ class Reconstitutor:
                 # time.sleep(0.01) # ANTHONY - delay for dev
                 self._write_metadata(piece)
         
-        # TODO: handle metadata files that update
+        # =====================================================
+
         # TODO: this will have to be live instead of written-to .torrents
         robot_subfolders = [f.path for f in os.scandir(self.pieces_path) if f.is_dir()]
         db_files = []
@@ -229,8 +231,8 @@ class Reconstitutor:
                 self._write_message(self.pieces[i])
                 self.pieces[i].metadata_written = True
 
-    def _parse_metadata(self, metadata_file: str):
-        pieces, idx = inspect_torrent(metadata_file)
+    def _parse_metadata(self, metadata):
+        pieces, idx = inspect_torrent(metadata)
         # create piece with topology preview
         return pieces, idx
         
