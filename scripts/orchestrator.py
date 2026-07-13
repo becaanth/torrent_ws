@@ -43,6 +43,7 @@ class Orchestrator:
         # dict of {'robot_id' : robot_id, 'seed' : mutable_seeder}
         mutable_seeder = MutableSeeder(
             params=seeder_params,
+            this_robot_id=self.robot_id,
             robot_id=self.robot_id,
             state=state
         )
@@ -73,12 +74,14 @@ class Orchestrator:
         self.topology[robot_id] = topology
         self.rec.update_topology(robot_id, topology)
 
-    def handle_torrent_discovered(self, robot_id):
+    def handle_torrent_discovered(self, robot_id, mutable_item):
         # new torrent discovered; spawn a new seeder (cb from mutable_peer)
         print(f"[orch] handle_torrent_discovered, id {robot_id}")
         mutable_seeder = MutableSeeder(
             params=seeder_params,
+            this_robot_id=self.robot_id,
             robot_id=robot_id,
+            mutable_item=mutable_item,
             state=state
         )
         self.fleet[robot_id] = mutable_seeder
