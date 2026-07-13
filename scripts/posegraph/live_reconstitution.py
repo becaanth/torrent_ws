@@ -434,7 +434,6 @@ class Reconstitutor:
 
     def _write_index(self, index_msg):
         # write index.db3, containing MapInfo message
-        print(f'wrining index ==================================================== \n\n\n\n\n\n\n\n\n\n{index_msg}')
         map_info = MapInfo(
             set=index_msg['set'],
             root_vid=index_msg['root_vid'],

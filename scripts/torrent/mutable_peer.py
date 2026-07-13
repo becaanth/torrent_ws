@@ -80,7 +80,7 @@ class MutablePeer:
         flush self.message_queue
         """
         # Check for new messages (non-blocking)
-        if not self.message_queue.empty():
+        while not self.message_queue.empty():
             sample = self.message_queue.get()
             
             mutable_item = on_mutable_item(sample)
