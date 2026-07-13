@@ -53,8 +53,8 @@ class MutablePeer:
         self.mutable_items = {}
 
         # inversion of control callbacks
-        self.on_torrent_discovered = on_torrent_discovered # spawn MutableSeeder # TODO wire
-        self.on_metadata_received = on_metadata_received   # pass to Reconstitutor # TODO wire
+        self.on_torrent_discovered = on_torrent_discovered # spawn MutableSeeder 
+        self.on_metadata_received = on_metadata_received   # pass to Reconstitutor
 
         # etc
         self.poll_hz = poll_hz
@@ -87,7 +87,7 @@ class MutablePeer:
             print(f"[Peer]: mutable item received \n {mutable_to_string(mutable_item)}")
 
             # check if heard own seeder
-            if mutable_item['robot_id'] == self.robot_id:
+            if mutable_item['my_ip'] == self.my_ip:
                 print(f"[Peer]: WARNING flush skipping. don't leech own pieces")
                 return
             
@@ -106,7 +106,7 @@ class MutablePeer:
 
                 # orchestrator callbacks
                 if self.on_torrent_discovered is not None:
-                    self.on_torrent_discovered(robot_id) # -> new session, spawn MutableSeeder
+                    self.on_torrent_discovered(robot_id, mutable_item) # -> new session, spawn MutableSeeder
 
             # if new infohash, remove old torrent session
             else:
@@ -140,7 +140,7 @@ class MutablePeer:
 
     def _poll_metadata(self):
         """
-        torrent sessions don;t immediately have metadata available.
+        torrent sessions don't immediately have metadata available.
         waiting in flush_queue blocks the thread
         """
         for handle in self.t_ses.get_torrents():
@@ -159,6 +159,7 @@ class MutablePeer:
                 # orchestrator callback
                 if self.on_metadata_received is not None:
                     self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
+                    
                     print(f"[Peer] poll_metadata updated for robot {robot_id}")
 
     def on_sample(self, sample):

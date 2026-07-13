@@ -79,15 +79,16 @@ def mutable_to_string(mutable_item):
 
 # inspection
 def inspect_torrent(encoded_info):
-    # DEPRECATED:  if reading from path
-    # raw = lt.bdecode(open(path, "rb").read())
-    # info = raw[b"info"]
     info = lt.bdecode(encoded_info)
     
-    # get MapInfo
-    idx = msgpack.unpackb(info[b'files'][0][b'x-idx'], raw=False)
-
     pieces : list[Piece] = []
+    # guard MapIfno
+    try:
+        idx = msgpack.unpackb(info[b'files'][0][b'x-idx'], raw=False)
+    except:
+        idx = None
+        return 
+    
     for file_entry in info.get(b"files", []):
         extras = {
             k.decode(): v
@@ -112,7 +113,6 @@ def inspect_torrent(encoded_info):
                 ))
             pieces.append(Piece(top_vertices=vertices, top_edges=edges, metadata_written=False, data_ingested=False))
 
-    print(f"inspect torrent: \n\tfirst vtx {hex(pieces[0].top_vertices[0].vertex_id)} \n\tlast vtx {hex(pieces[-1].top_vertices[-1].vertex_id)}")
     return pieces, idx['idx']
 
 def on_mutable_item(sample):

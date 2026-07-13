@@ -23,19 +23,20 @@ class MutableSeeder:
     1) update Zenoh discovery messages and broadcast
     2) seed the immutable snapshots
     """
-    def __init__(self, params : dict, robot_id : int, state : dict, poll_hz : float = 0.2):
+    def __init__(self, params : dict, this_robot_id : int, robot_id : int, state : dict, mutable_item = None, poll_hz : float = 0.2):
         # robot params
         self.container = params['container']
-        self.my_ip, z_cfg = unpack_device(params, robot_id)
+        self.my_ip, z_cfg = unpack_device(params, this_robot_id)
         self.router = params['router']
 
         # data params
         self.posegraph = params['posegraph']
+        self.this_robot_id = this_robot_id
         self.robot_id = robot_id
         self.state = state
 
         # file system
-        self.input_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}_{self.robot_id}/{self.robot_id}"
+        self.input_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}_{self.this_robot_id}/{self.robot_id}"
         self.bencoded_torrent_dict = {}
         os.makedirs(self.input_path, exist_ok=True)
     
@@ -56,13 +57,18 @@ class MutableSeeder:
         # mutable update
         sk = SigningKey(bytes.fromhex(self.state["sk"]))
 
-        self.mi = { 
-        'pubkey' : sk.verify_key.encode(),
-        'robot_id' : robot_id,
-        'seq' : self.state['seq'],
-        'infohash' : -1,
-        'my_ip' : self.my_ip
-        }
+        # is this robot the authority on this session?
+        if self.this_robot_id == self.robot_id:
+            self.mi = { 
+            'pubkey' : sk.verify_key.encode(),
+            'robot_id' : robot_id,
+            'seq' : self.state['seq'],
+            'infohash' : -1,
+            'my_ip' : self.my_ip
+            }
+        else:
+            self.mi = mutable_item
+            self.mi['my_ip'] = self.my_ip
 
         # etc
         self.poll_hz = poll_hz
@@ -95,10 +101,11 @@ class MutableSeeder:
             handle = self.t_ses.add_torrent({"ti" : ti, "save_path" : os.path.dirname(self.input_path)})
             print(f"[Seeder]: snapshot created with hash {ti}")
 
-            # update mutable item
-            self.mi['infohash'] = infohash.to_bytes()
-            self.mi['seq']+=1
-            print(f"[Seeder]: seeding mutable item: \n{mutable_to_string(self.mi)}")
+            # update mutable item if authority
+            if self.this_robot_id == self.robot_id:
+                self.mi['infohash'] = infohash.to_bytes()
+                self.mi['seq']+=1
+                print(f"[Seeder]: seeding mutable item: \n{mutable_to_string(self.mi)}")
                 
         if self.start_flag:
             # pub gossip over Zenoh
