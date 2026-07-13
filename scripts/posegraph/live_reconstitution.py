@@ -132,7 +132,6 @@ class Reconstitutor:
         """
         Read new deconstructed data, metadata
         """
-        # TODO: refactor =================
         if self.topology:
             for r_id, topo in self.topology.items():
                 # dont need topology for pieces this robot made
@@ -140,7 +139,7 @@ class Reconstitutor:
                     continue
                 
                 pieces, idx = inspect_torrent(topo)
-                if not self._index_written: # write MapInfo
+                if not self._index_written and idx is not None: # write MapInfo (from remote)
                     self._write_index(idx)
                     self._index_written = True    
 
@@ -155,7 +154,6 @@ class Reconstitutor:
                         if len(piece.top_edges) > len(tracked_piece.top_edges):
                             print(f"[Reconstitutor]: Merging {len(piece.top_edges) - len(tracked_piece.top_edges)} cross-session edges into submap {hex(vid)}")
                             tracked_piece.top_edges = piece.top_edges
-                            # Force a rewriting of the metadata skeleton so the new edge gets a database row ID
                             tracked_piece.metadata_written = False
       
             # Write metadata skeletons for any piece not yet written
@@ -198,17 +196,15 @@ class Reconstitutor:
                                         target_piece = piece
                                         break
                         
-                        # If it's a remote piece and still not found in our metadata layout, 
-                        # it genuinely belongs to a future session we haven't seen metadata for yet.
+                        # if remote and not in our metadata, must be from a future session
                         if target_piece is None:
                             continue
 
                     poll_data = self._parse_piece(folder_name, db_file)
-                    poll_data = self._parse_piece(folder_name, db_file)
                     if not poll_data or poll_data['vertices'].empty:
                         continue
 
-                    # if THIS robot's pieces
+                    # if this robot's pieces
                     if folder_name == self.robot_id:
                         self._ingest_local_piece(poll_data)
                         print(f"[Reconstitutor]: ingest local piece {db_file}")
@@ -251,6 +247,20 @@ class Reconstitutor:
         
         for k in self._db_relpaths:
             if k == 'index':
+                if not self._index_written: # write MapInfo (local)
+                    self._index_written = True   
+                    graph_msg = inspect_ros_data(poll_data['vtr_index'].iloc[0])
+                    idx = {
+                                'set': graph_msg.map_info.set,
+                                'root_vid': graph_msg.map_info.root_vid,
+                                'lng': graph_msg.map_info.lng,
+                                'lat': graph_msg.map_info.lat,
+                                'theta': graph_msg.map_info.theta,
+                                'scale': graph_msg.map_info.scale,
+                                'curr_major_id': graph_msg.curr_major_id,
+                                'curr_minor_id': graph_msg.curr_minor_id
+                            }
+                    self._write_index(idx)
                 continue
             
             field = field_map.get(k, k)
@@ -426,6 +436,7 @@ class Reconstitutor:
 
     def _write_index(self, index_msg):
         # write index.db3, containing MapInfo message
+        print(f'wrining index ==================================================== \n\n\n\n\n\n\n\n\n\n{index_msg}')
         map_info = MapInfo(
             set=index_msg['set'],
             root_vid=index_msg['root_vid'],
