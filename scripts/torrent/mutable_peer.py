@@ -14,7 +14,7 @@ class MutablePeer:
     """
     Listen to Zenoh gossip, join a torrent session
     """
-    def __init__(self, params : dict, state : dict, robot_id, poll_hz : float = 0.1,
+    def __init__(self, params : dict, state : dict, robot_id, poll_hz : float = 0.5,
                  on_torrent_discovered=None, on_metadata_received=None):
         
         # robot params
@@ -47,6 +47,7 @@ class MutablePeer:
         z_cfg.insert_json5("listen/endpoints", "[]")
         self.z_ses = zenoh.open(z_cfg)
         self.sub = self.z_ses.declare_subscriber("mutable_items/**", self.on_sample)
+        self.last_sample = None
         
         # mutable updates
         self.mutable_items = {}
@@ -91,10 +92,10 @@ class MutablePeer:
                 return
             
             # check if new session discovered
-            existing_ids = {mi['robot_id'] for keys, mi in self.mutable_items.items() if 'robot_id' in mi}
+            existing_ids = {mi['robot_id'] for _, mi in self.mutable_items.items() if 'robot_id' in mi}
             robot_id = mutable_item['robot_id']
             if robot_id not in existing_ids:
-                print(f"[Peer]: new \n\t {mutable_to_string(mutable_item)}")
+                print(f"[Peer]: new \n{mutable_to_string(mutable_item)}")
                 self.mutable_items[robot_id] = mutable_item
                 handle = self.t_ses.add_torrent({
                     'info_hash': mutable_item['infohash'],
@@ -117,26 +118,25 @@ class MutablePeer:
 
                     # remove old torrent
                     for active_handle in self.t_ses.get_torrents():
-                        print(f"DEBUG [Peer]: active_handle {active_handle.get_torrent_info()}")
-                        if active_handle is None:
-                            return 
-                        
-                        if active_handle.get_torrent_info().info_hash().to_bytes() == saved_mi['infohash']:
-                            self.t_ses.remove_torrent(active_handle)
-                            handle = self.t_ses.add_torrent({
-                                'info_hash': mutable_item['infohash'],
-                                'save_path': self.output_path
-                            })
-                            for ip, p in self.peers:
-                                handle.connect_peer((ip, p))
+                        try:                        
+                            if active_handle.get_torrent_info().info_hash().to_bytes() == saved_mi['infohash']:
+                                self.t_ses.remove_torrent(active_handle)
+                                handle = self.t_ses.add_torrent({
+                                    'info_hash': mutable_item['infohash'],
+                                    'save_path': self.output_path
+                                })
+                                for ip, p in self.peers:
+                                    handle.connect_peer((ip, p))
+                        except:
+                            print("[Peer]: no torrent info")
 
         # Monitor existing torrents
         for handle in self.t_ses.get_torrents():
             s = handle.status()
             print(f"[Peer]: progress {s.progress*100:.1f}%")
 
-        for key, mi in self.mutable_items.items():
-            print(f"[Peer]: item \n{mutable_to_string(mi)})")
+        # for _, mi in self.mutable_items.items():
+        #     print(f"[Peer]: item \n{mutable_to_string(mi)})")
 
     def _poll_metadata(self):
         """
@@ -162,8 +162,12 @@ class MutablePeer:
                     print(f"[Peer] poll_metadata updated for robot {robot_id}")
 
     def on_sample(self, sample):
-        print('[Peer]: Received Zenoh message')
-        self.message_queue.put(sample)
+        print("[Peer]: Received Zenoh message")
+        if sample != self.last_sample:
+            self.message_queue.put(sample)
+            self.last_sample = sample
+        else:
+            print(f"[Peer]: Duplicate sample received")
 
 # ======================================================
 

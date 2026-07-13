@@ -89,7 +89,6 @@ class Reconstitutor:
         self._last_rowid = {k: 0 for k in self._db_relpaths}    
         self._init_database()
         self._index_written = False
-        self._metadata_written = False # TODO: be more clever
 
         # file tracking
         self.db_files = []
@@ -135,7 +134,7 @@ class Reconstitutor:
         if self.topology:
             for r_id, topo in self.topology.items():
                 # dont need topology for pieces this robot made
-                if r_id == self.robot_id:
+                if str(r_id) == str(self.robot_id):
                     continue
                 
                 pieces, idx = inspect_torrent(topo)
@@ -383,7 +382,6 @@ class Reconstitutor:
         """
         Connect to existing conns and write messages
         """
-        s = time.time()
         field_map = {
             'index':       'vtr_index',
             'pointmap_v0': 'pointmap',

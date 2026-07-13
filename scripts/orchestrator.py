@@ -36,6 +36,7 @@ class Orchestrator:
             input_dir=source_pg,
             output_dir=source_pc,
             robot_id=self.robot_id,
+            poll_hz=4.0
         )
 
         # from pieces, pub Zenoh, seed torrent
@@ -69,7 +70,6 @@ class Orchestrator:
     def handle_metadata_received(self, robot_id, topology):
         # topology update, pass to reconstitutor (cb from mutable_peer)
         print(f"[orch] handle_metadata_received for id {robot_id}")
-        print(f"[orch] handle_metadata_received topology is type {type(topology)}")
         self.topology[robot_id] = topology
         self.rec.update_topology(robot_id, topology)
 
@@ -82,6 +82,8 @@ class Orchestrator:
             state=state
         )
         self.fleet[robot_id] = mutable_seeder
+        new_thread = threading.Thread(target=self.fleet[robot_id].run, daemon=True)
+        new_thread.start()
 
     def run(self):
         logging.info("[agent.run]")

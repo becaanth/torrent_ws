@@ -19,7 +19,10 @@ ROBOT_IPS = {
 DOCKER_IPS = {
     'torrent0':'172.18.0.2',
     'torrent1':'172.18.0.3',
-    'torrent2':'172.18.0.2',
+    'torrent2':'172.18.0.4',
+    'torrent3':'172.18.0.4',
+    'torrent4':'172.18.0.3',
+    'torrent5':'172.18.0.3',
 }
 
 # -------------------------
@@ -94,8 +97,6 @@ def inspect_torrent(encoded_info):
         if extras:
             raw_vertices = msgpack.unpackb(file_entry[b"x-vertices"], raw=False)
             raw_edges    = msgpack.unpackb(file_entry[b"x-edges"],    raw=False)
-            # pprint.pprint(raw_vertices, indent=4)
-            # pprint.pprint(raw_edges, indent=8)
 
             # package into classes
             vertices, edges = [],[]
@@ -109,8 +110,9 @@ def inspect_torrent(encoded_info):
                     type=raw_edge['type'],
                     xi=raw_edge['xi'],
                 ))
-            pieces.append(Piece(top_vertices=vertices, top_edges=edges, metadata_written=False))
+            pieces.append(Piece(top_vertices=vertices, top_edges=edges, metadata_written=False, data_ingested=False))
 
+    print(f"inspect torrent: \n\tfirst vtx {hex(pieces[0].top_vertices[0].vertex_id)} \n\tlast vtx {hex(pieces[-1].top_vertices[-1].vertex_id)}")
     return pieces, idx['idx']
 
 def on_mutable_item(sample):
