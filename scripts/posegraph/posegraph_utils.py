@@ -293,6 +293,7 @@ class Piece:
     top_vertices: list[Vertex]
     top_edges: list[Edge]
     metadata_written: bool
+    data_ingested: bool
     skeleton_rowids: dict = field(default_factory=dict)
     vertices: Optional[pd.DataFrame] = None
     edges: Optional[pd.DataFrame] = None

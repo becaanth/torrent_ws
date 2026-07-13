@@ -97,7 +97,7 @@ class Reconstitutor:
 
         # list pieces that have been previewed, but not written
         # TODO: modify to be a dict of piece previews (robot-ids)
-        self.pieces : list[Piece] = []
+        self.pieces : dict[int, Piece] = {}
 
     # ============= PUBLIC =================
     def run(self):
@@ -134,8 +134,6 @@ class Reconstitutor:
         """
         # TODO: refactor =================
         if self.topology:
-            existing = {p.top_vertices[0].vertex_id: p for p in self.pieces}
-            new_pieces = []
             for r_id, topo in self.topology.items():
                 # dont need topology for pieces this robot made
                 if r_id == self.robot_id:
@@ -148,15 +146,21 @@ class Reconstitutor:
 
                 for piece in pieces:
                     vid = piece.top_vertices[0].vertex_id
-                    if vid in existing:
-                        new_pieces.append(existing[vid])  # preserve rowids
-                    else:
-                        new_pieces.append(piece)
-            self.pieces = new_pieces
+                    if vid not in self.pieces:
+                        piece.metadata_written = False
+                        piece.data_ingested = False
+                        self.pieces[vid] = piece
+                    else: # tracked piece
+                        tracked_piece = self.pieces[vid]
+                        if len(piece.top_edges) > len(tracked_piece.top_edges):
+                            print(f"[Reconstitutor]: Merging {len(piece.top_edges) - len(tracked_piece.top_edges)} cross-session edges into submap {hex(vid)}")
+                            tracked_piece.top_edges = piece.top_edges
+                            # Force a rewriting of the metadata skeleton so the new edge gets a database row ID
+                            tracked_piece.metadata_written = False
       
             # Write metadata skeletons for any piece not yet written
-            for piece in self.pieces:
-                if not piece.metadata_written:  # empty dict = not yet written
+            for vid, piece in self.pieces.items():
+                if not getattr(piece, 'metadata_written', False):  # empty dict = not yet written
                     # time.sleep(0.01) # ANTHONY - delay for dev
                     self._write_metadata(piece)
 
@@ -179,7 +183,30 @@ class Reconstitutor:
                     continue
 
                 try:
+                    first_vid = int(db_file[:-4],16)
+
+                    target_piece = None
+                    if folder_name != self.robot_id:
+                        if first_vid in self.pieces:
+                            target_piece = self.pieces[first_vid]
+                        else:
+                            for vid, piece in self.pieces.items():
+                                if piece.top_vertices:
+                                    v_min = piece.top_vertices[0].vertex_id
+                                    v_max = piece.top_vertices[-1].vertex_id
+                                    if v_min <= first_vid <= v_max:
+                                        target_piece = piece
+                                        break
+                        
+                        # If it's a remote piece and still not found in our metadata layout, 
+                        # it genuinely belongs to a future session we haven't seen metadata for yet.
+                        if target_piece is None:
+                            continue
+
                     poll_data = self._parse_piece(folder_name, db_file)
+                    poll_data = self._parse_piece(folder_name, db_file)
+                    if not poll_data or poll_data['vertices'].empty:
+                        continue
 
                     # if THIS robot's pieces
                     if folder_name == self.robot_id:
@@ -189,7 +216,7 @@ class Reconstitutor:
                     else:
                         if not self.pieces:
                             continue # wait for metadata
-                        self._ingest_remote_piece(poll_data)
+                        self._ingest_remote_piece(poll_data, target_piece)
                         print(f"[Reconstitutor]: ingest remote piece {db_file}")
 
                     self.db_written.append(db_file)
@@ -197,7 +224,7 @@ class Reconstitutor:
                     print(f"[Reconstitutor]: WARNING Could not read from {db_file}")
                     continue
 
-    def _parse_piece(self, folder_path: str, db_file: pd.DataFrame):
+    def _parse_piece(self, folder_path: str, db_file: str):
         """
         Read from a submap-wise .db3
         """
@@ -211,7 +238,7 @@ class Reconstitutor:
                 df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
                 poll_data[table] = df
             except:
-                print(f"[Reconstitutor]: _parse_piece exception")
+                print(f"[Reconstitutor]: _parse_piece exception {db_file}")
                 poll_data[table] = pd.DataFrame() 
 
         conn.close()
@@ -223,11 +250,7 @@ class Reconstitutor:
         field_map = {'index': 'vtr_index', 'pointmap_v0': 'pointmap'}
         
         for k in self._db_relpaths:
-            if k == 'index' and not self._index_written:
-                try:
-                    self._write_index(poll_data.get('index'))
-                except:
-                    pass
+            if k == 'index':
                 continue
             
             field = field_map.get(k, k)
@@ -247,27 +270,20 @@ class Reconstitutor:
                 conn.execute("COMMIT;")
         print(f"[Reconstitutor]: Direct Local Ingestion Complete: {time.time() - s:.4f}s")
 
-    def _ingest_remote_piece(self, poll_data: pd.DataFrame):
+    def _ingest_remote_piece(self, poll_data: pd.DataFrame, piece: Piece):
         # take poll_data, fill relevant Piece
-        if poll_data['vertices'].empty:
-            return
-        
-
-        first_vid = inspect_ros_data(poll_data['vertices'].iloc[0]).id
-        for i, piece in enumerate(self.pieces):
-            if first_vid == piece.top_vertices[0].vertex_id:
-                print("[Reconstitutor]: ingest found match")
-                self.pieces[i].vertices = poll_data['vertices']
-                self.pieces[i].edges = poll_data['edges']
-                self.pieces[i].pointmap = poll_data['pointmap']
-                self.pieces[i].pointmap_v0 = poll_data['pointmap']
-                self.pieces[i].pointmap_ptr = poll_data['pointmap_ptr']
-                self.pieces[i].waypoint_name = poll_data['waypoint_name']
-                self.pieces[i].vtr_index = poll_data['vtr_index']
-                self.pieces[i].env_info = poll_data['env_info']
-                self._write_message(self.pieces[i])
-                self.pieces[i].metadata_written = True
-        
+            piece.vertices = poll_data['vertices']
+            piece.edges = poll_data['edges']
+            piece.pointmap = poll_data['pointmap']
+            piece.pointmap_v0 = poll_data['pointmap']
+            piece.pointmap_ptr = poll_data['pointmap_ptr']
+            piece.waypoint_name = poll_data['waypoint_name']
+            piece.vtr_index = poll_data['vtr_index']
+            piece.env_info = poll_data['env_info']
+            self._write_message(piece)
+            piece.data_ingested = True
+            print(f"[Reconstitutor]: ingest found match for submap {piece.top_vertices[0].vertex_id}")
+    
     # ============ .db3 INTERFACE ==============
     def _init_database(self):
         """
@@ -378,20 +394,23 @@ class Reconstitutor:
                 conn.execute("BEGIN;")
                 if k in skeleton_keys:
                     rowids = piece.skeleton_rowids.get(k)
-                    if not rowids:
-                        conn.execute("ROLLBACK;")
-                        continue
-                    if len(rowids) != len(df):
-                        conn.execute("ROLLBACK;")
-                        continue
-                    # Fill in the NULL skeletons in order
-                    conn.executemany("""
-                        UPDATE messages SET data = ?, timestamp = ?
-                        WHERE id = ?
+                    if not rowids or len(rowids) != len(df):
+                        # dynamically insert rows instead of calling ROLLBACK and ignoring it.
+                        conn.executemany("""
+                            INSERT INTO messages (topic_id, timestamp, data)
+                            VALUES (?, ?, ?)
                         """, [
-                            (row['data'], int(row['timestamp']), rowid) 
-                            for rowid, (_, row) in zip(rowids, df.iterrows())
+                            (self._last_rowid[k], int(row['timestamp']), row['data'])
+                            for _, row in df.iterrows()
                         ])
+                    else:
+                        conn.executemany("""
+                            UPDATE messages SET data = ?, timestamp = ?
+                            WHERE id = ?
+                            """, [
+                                (row['data'], int(row['timestamp']), rowid) 
+                                for rowid, (_, row) in zip(rowids, df.iterrows())
+                            ])
                 else:           
                     # no skeleton exists                                  
                     conn.executemany("""
@@ -403,7 +422,7 @@ class Reconstitutor:
                     ])
                 
                 conn.execute("COMMIT;")
-                print(f"[Reconstitutor]: _write_message: {time.time() - s}")
+                print(f"[Reconstitutor]: _write_message: {hex(piece.top_vertices[0].vertex_id)}")
 
     def _write_index(self, index_msg):
         # write index.db3, containing MapInfo message
