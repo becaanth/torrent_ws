@@ -57,20 +57,21 @@ def _read_full_df(conn: sqlite3.Connection) -> pd.DataFrame:
 
 def _read_new_rows(conn: sqlite3.Connection, after_rowid: int) -> pd.DataFrame:
     """Read only rows with rowid > after_rowid."""
-    return pd.read_sql_query(
-        f"""
-        SELECT t.name  AS topic_name,
-               t.type  AS topic_type,
-               m.rowid AS rowid,
-               m.timestamp,
-               m.data
-        FROM   messages AS m
-        JOIN   topics   AS t ON m.topic_id = t.id
-        WHERE  m.rowid > {after_rowid}
-        ORDER  BY m.rowid
-        """,
-        conn,
-    )
+    new_rows = pd.read_sql_query(
+            f"""
+            SELECT t.name  AS topic_name,
+                t.type  AS topic_type,
+                m.rowid AS rowid,
+                m.timestamp,
+                m.data
+            FROM   messages AS m
+            JOIN   topics   AS t ON m.topic_id = t.id
+            WHERE  m.rowid > {after_rowid}
+            ORDER  BY m.rowid
+            """,
+            conn,
+        )
+    return new_rows
 
 # ---------------------------------------------------------------------------
 # Deconstitutor
@@ -133,7 +134,7 @@ class Deconstitutor:
         # index df read lazily on first successful connection
         self._index_df: pd.DataFrame | None = None
 
-        print(f"[Deconstitutor]: initialized with output_dir: {output_dir}")
+        print(f"[Deconstitutor]: initialized with IP {self.input_dir} OP: {self.output_dir}")
 
     # ------------------------------------------------------------------
     # Public
@@ -168,14 +169,16 @@ class Deconstitutor:
     def _poll(self):
         """Read new rows from all sources, then write any new chunks."""
         print(f"[Deconstitutor]: polling")
-        if self._index_df is None:
-            conn = self._get_conn('index')
-            if conn is not None:
-                try:
-                    self._index_df = _read_full_df(conn)
-                    self._last_rowid['index'] = int(self._index_df['rowid'].max()) if len(self._index_df) else 0
-                except Exception as e:
-                    print(f"[Deconstitutor]: index: not ready yet ({e})")
+        conn = self._get_conn('index')
+        print(f"[Deconstitutor]: conn {conn}")
+        if conn is not None:
+            try:
+                self._index_df = _read_full_df(conn)
+                self._last_rowid['index'] = int(self._index_df['rowid'].max()) if len(self._index_df) else 0
+            except Exception as e:
+                print(f"[Deconstitutor]: index: not ready yet ({e})")
+        else:
+            print(f"[Deconstitutor]: conn is None")
 
         self._ingest_new_rows('vertices',      self._parse_vertices)
         self._ingest_new_rows('edges',         self._parse_edges)
@@ -184,7 +187,11 @@ class Deconstitutor:
         self._ingest_new_rows('waypoint_name', None)
         self._ingest_new_rows('env_info',      None)
 
-        self._write_new_chunks(self.robot_id)
+        if self._index_df is not None and not self._index_df.empty:
+            print(f"[Deconstitutor]: write new chunks")
+            self._write_new_chunks(self.robot_id)
+        else:
+            print("[Deconstitutor]: Delaying chunk writing, waiting for valid index structure.")
 
     def _ingest_new_rows(self, key: str, parse_fn):
         """
@@ -219,9 +226,6 @@ class Deconstitutor:
 
         if parse_fn is not None:
             parse_fn(new_rows)
-
-        # print(f"[Deconstitutor]: {key}: +{len(new_rows)} rows "
-        #       f"(total {len(self._df[key])})")
 
     # ------------------------------------------------------------------
     # Internal — id array updaters (mirrors get_db3_elements decoding)
@@ -261,14 +265,19 @@ class Deconstitutor:
         """
         # print(f"[Deconstitutor]: writing new chunks")
 
-        for i, sid in enumerate(self._submap_ids[:-1]):
+        for i, sid in enumerate(self._submap_ids):
             if i in self._written_chunks:
+                continue
+
+            # only touch finalized submaps (2 submap buffer)
+            if not (i < len(self._submap_ids) - 2):
                 continue
 
             sid = int(sid)
 
             # only write chunks originated by this robot; other pieces will have come from torrent
             originator_id = extract_robot_id(sid)
+            print(f"[Deconstitutor]: this robot {self.robot_id}, originator {originator_id}")
             if (originator_id != robot_id):
                 self._written_chunks.add(i)
                 continue
@@ -333,7 +342,7 @@ class Deconstitutor:
 
             pad_file_to_exact_size(db_path, PIECE_SIZE)
             self._written_chunks.add(i)
-            print(f"[Deconstitutor]: wrote chunk {str(hex(int(sid)))[2:].zfill(16)}.db3  (submap vertex_id={sid})")
+            print(f"[Deconstitutor]: finalized chunk {str(hex(int(sid)))[2:].zfill(16)}.db3")
 
     # ------------------------------------------------------------------
     # Cleanup
