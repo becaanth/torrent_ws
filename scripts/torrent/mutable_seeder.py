@@ -31,8 +31,8 @@ class MutableSeeder:
 
         # data params
         self.posegraph = params['posegraph']
-        self.this_robot_id = this_robot_id
-        self.robot_id = robot_id
+        self.this_robot_id = int(this_robot_id)
+        self.robot_id = int(robot_id)
         self.state = state
 
         # file system
@@ -190,6 +190,7 @@ if __name__ == "__main__":
     parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
     parser.add_argument('--poll_hz', type=float, default = 0.25)
     args = parser.parse_args()
+    this_robot_id = os.getenv("ROBOT_ID")
 
     with open(f'torrent/{args.seeder_params}', "r") as f:
                 params = json.load(f)
@@ -199,6 +200,7 @@ if __name__ == "__main__":
 
     mutable_seeder = MutableSeeder(
         params=params,
+        this_robot_id=this_robot_id,
         robot_id=args.robot_id,
         state=state,
         poll_hz=args.poll_hz
