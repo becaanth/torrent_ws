@@ -11,7 +11,7 @@ RUN_ID=$1
 
 # 2. Define path constants based on your environment variables
 SCRIPT_PATH="$VTRROOT/vtr3_pose_graph/samples/plot_teach_path.py"
-GRAPH_PATH="$VTRTEMP/pgs/rutias_$RUN_ID/graph/"
+GRAPH_PATH="$VTRTEMP/pgs/rdome_loop_$RUN_ID/graph/"
 
 echo "Starting plotter loop for Run ID: $RUN_ID. Press [CTRL+C] to stop."
 echo "Target Graph: $GRAPH_PATH"
