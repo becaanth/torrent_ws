@@ -23,7 +23,7 @@ class MutableSeeder:
     1) update Zenoh discovery messages and broadcast
     2) seed the immutable snapshots
     """
-    def __init__(self, params : dict, this_robot_id : int, robot_id : int, state : dict, mutable_item = None, poll_hz : float = 0.2):
+    def __init__(self, params : dict, this_robot_id : int, robot_id : int, state : dict, mutable_item = None, poll_hz : float = 0.2, on_torrent_updated=None):
         # robot params
         self.container = params['container']
         self.my_ip, z_cfg = unpack_device(params, this_robot_id)
@@ -73,6 +73,9 @@ class MutableSeeder:
         # etc
         self.poll_hz = poll_hz
         self.start_flag = False
+
+        # inversion of control callback
+        self.on_torrent_updated = on_torrent_updated # -> update mutable item from remote
 
     def run(self):
         """
@@ -134,7 +137,7 @@ class MutableSeeder:
         torrent_dict = t.generate()
         wrote_idx = False
         # annotate each entry in the dictionary
-        for i, file_entry in enumerate(torrent_dict[b"info"][b"files"]):
+        for _, file_entry in enumerate(torrent_dict[b"info"][b"files"]):
             if b"attr" in file_entry and b"p" in file_entry[b"attr"]: # skip padding files
                 continue
 
@@ -144,6 +147,9 @@ class MutableSeeder:
             if not os.path.exists(target_file_path) or os.path.getsize(target_file_path) == 0:
                 print(f"[Seeder]: snapshot WARNING: Skipping empty or missing file {filename}")
                 continue
+
+            if os.path.exists(target_file_path + "-journal") or os.path.exists(target_file_path + "-wal"):
+                continue 
 
             try:
                 if wrote_idx == False:
@@ -168,6 +174,12 @@ class MutableSeeder:
         self.bencoded_torrent_dict = lt.bencode(torrent_dict)
 
         return ti
+    
+    def update_mutable_item(self, mutable_item):
+        print(f"[Seeder]: updating mutable item for robot {self.robot_id}")
+        if self.mi['seq'] < mutable_item['seq']:
+            self.mi = mutable_item
+            self.mi['my_ip'] = self.my_ip
 
 # ======================================================
 

@@ -9,9 +9,6 @@ import os
 
 import threading
 import logging
-import time
-
-import pdb
 
 class Orchestrator:
     """
@@ -29,7 +26,7 @@ class Orchestrator:
         rcv_pg = f"{VTRTEMP}/pgs/r{posegraph}_{robot_id}/graph" # output posegraph from rec
         self.robot_id = robot_id
 
-        print(f"[orch] init with id {robot_id}, posegraph {posegraph}")
+        print(f"[Orchestrator]: init with id {robot_id}, posegraph {posegraph}")
 
         # posegraph -> pieces
         self.dec = Deconstitutor(
@@ -57,7 +54,8 @@ class Orchestrator:
             state=state,
             robot_id=robot_id,
             on_torrent_discovered=self.handle_torrent_discovered,
-            on_metadata_received=self.handle_metadata_received
+            on_metadata_received=self.handle_metadata_received,
+            on_torrent_updated=self.handle_torrent_update
         )
 
         # pieces -> posegraph
@@ -68,15 +66,9 @@ class Orchestrator:
             output_dir=rcv_pg
         )
 
-    def handle_metadata_received(self, robot_id, topology):
-        # topology update, pass to reconstitutor (cb from mutable_peer)
-        print(f"[orch] handle_metadata_received for id {robot_id}")
-        self.topology[robot_id] = topology
-        self.rec.update_topology(robot_id, topology)
-
     def handle_torrent_discovered(self, robot_id, mutable_item):
         # new torrent discovered; spawn a new seeder (cb from mutable_peer)
-        print(f"[orch] handle_torrent_discovered, id {robot_id}")
+        print(f"[Orchestrator]: handle_torrent_discovered, id {robot_id}")
         mutable_seeder = MutableSeeder(
             params=seeder_params,
             this_robot_id=self.robot_id,
@@ -87,6 +79,16 @@ class Orchestrator:
         self.fleet[robot_id] = mutable_seeder
         new_thread = threading.Thread(target=self.fleet[robot_id].run, daemon=True)
         new_thread.start()
+
+    def handle_metadata_received(self, robot_id, topology):
+        # topology update, pass to reconstitutor (cb from mutable_peer)
+        print(f"[Orchestrator]: handle_metadata_received for id {robot_id}")
+        self.topology[robot_id] = topology
+        self.rec.update_topology(robot_id, topology)
+
+    def handle_torrent_update(self, robot_id, mutable_item):
+        print(f"[Orchestrator]: handle_torrent_update for id {robot_id}")
+        self.fleet[robot_id].update_mutable_item(mutable_item)
 
     def run(self):
         logging.info("[agent.run]")

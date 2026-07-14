@@ -15,7 +15,7 @@ class MutablePeer:
     Listen to Zenoh gossip, join a torrent session
     """
     def __init__(self, params : dict, state : dict, robot_id, poll_hz : float = 0.5,
-                 on_torrent_discovered=None, on_metadata_received=None):
+                 on_torrent_discovered=None, on_metadata_received=None, on_torrent_updated=None):
         
         # robot params
         self.container = params['container']
@@ -54,6 +54,7 @@ class MutablePeer:
 
         # inversion of control callbacks
         self.on_torrent_discovered = on_torrent_discovered # spawn MutableSeeder 
+        self.on_torrent_updated = on_torrent_updated # spawn MutableSeeder 
         self.on_metadata_received = on_metadata_received   # pass to Reconstitutor
 
         # etc
@@ -115,6 +116,10 @@ class MutablePeer:
                     # overwrite mutable item
                     print(f"[Peer]: overwrite \n\t {mutable_to_string(mutable_item)}")
                     self.mutable_items[robot_id] = mutable_item
+
+                    # enforce robots authority on local sessions
+                    if self.on_torrent_updated is not None and mutable_item['robot_id']!=self.robot_id:
+                        self.on_torrent_updated(robot_id, mutable_item)
 
                     # remove old torrent
                     for active_handle in self.t_ses.get_torrents():
