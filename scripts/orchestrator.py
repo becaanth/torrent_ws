@@ -20,10 +20,17 @@ class Orchestrator:
     """
     def __init__(self, seeder_params: dict, peer_params: dict, state:dict, robot_id: int, posegraph: str):
         VTRTEMP = os.getenv("VTRTEMP")
+        
+        # source_pg = f"{VTRTEMP}/pgs/{posegraph}/graph" # input posegraph to dec
+        # source_pc = f"{VTRTEMP}/pcs/{posegraph}_{robot_id}/{robot_id}" # output pieces
+        # rcv_pc = f"{VTRTEMP}/pcs/{posegraph}_{robot_id}" # received pieces
+        # rcv_pg = f"{VTRTEMP}/pgs/r{posegraph}_{robot_id}/graph" # output posegraph from rec
+        
         source_pg = f"{VTRTEMP}/pgs/{posegraph}/graph" # input posegraph to dec
         source_pc = f"{VTRTEMP}/pcs/{posegraph}_{robot_id}/{robot_id}" # output pieces
         rcv_pc = f"{VTRTEMP}/pcs/{posegraph}_{robot_id}" # received pieces
-        rcv_pg = f"{VTRTEMP}/pgs/r{posegraph}_{robot_id}/graph" # output posegraph from rec
+        rcv_pg = f"{VTRTEMP}/pgs/{posegraph}/graph" # output posegraph from rec
+        
         self.robot_id = robot_id
 
         print(f"[Orchestrator]: init with id {robot_id}, posegraph {posegraph}")
