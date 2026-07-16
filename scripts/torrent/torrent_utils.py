@@ -142,7 +142,7 @@ def unpack_device(params : dict, robot_id):
         cfg.insert_json5("connect/endpoints", tcp)
     elif d == 'hunter':
         my_ip = ROBOT_IPS[params['container']]
-        cfg = zenoh.Config.from_file(f"../warthog/hunter2_zenoh.json5")    
+        cfg = zenoh.Config.from_file(f"{os.getenv("VTRROOT")}/hunter/hunter2_zenoh.json5")    
     else:
         print('unpack device: bad params/device')
 
