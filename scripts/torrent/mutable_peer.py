@@ -3,6 +3,7 @@ import libtorrent as lt
 import time
 import zenoh
 from queue import Queue
+from collections import deque
 import os
 import argparse
 
@@ -30,6 +31,7 @@ class MutablePeer:
 
         # file system
         self.output_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}_{self.robot_id}"
+        print(f"[Peer]: outputh path: {self.output_path}")
         os.makedirs(self.output_path, exist_ok=True)
 
         # libtorrent
@@ -153,7 +155,6 @@ class MutablePeer:
                 # get torrent info (metadata)
                 info = handle.get_torrent_info()
                 metadata = info.metadata()
-
                 # find associated robot_id
                 infohash = info.info_hash().to_bytes()
                 for rid, mi in self.mutable_items.items():
@@ -163,7 +164,8 @@ class MutablePeer:
 
                 # orchestrator callback
                 if self.on_metadata_received is not None:
-                    self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
+                    if robot_id is not None or metadata is not None:
+                        self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
                     
                     print(f"[Peer] poll_metadata updated for robot {robot_id}")
 
