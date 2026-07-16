@@ -9,6 +9,7 @@ from posegraph.posegraph_utils import *
 
 # DEVICE CONFIGS
 ROBOT_IPS = {
+    'base' : '192.168.5.1',
     'mr_green':'192.168.2.42',
     'prof_plum':'192.168.3.42',
     'col_mustard':'192.168.4.42',
@@ -22,7 +23,7 @@ DOCKER_IPS = {
     'torrent2':'172.18.0.4',
     'torrent3':'172.18.0.4',
     'torrent4':'172.18.0.3',
-    'torrent5':'172.18.0.3',
+    'torrent8':'172.18.0.3',
 }
 
 # -------------------------
