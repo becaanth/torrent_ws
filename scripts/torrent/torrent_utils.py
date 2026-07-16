@@ -9,7 +9,7 @@ from posegraph.posegraph_utils import *
 
 # DEVICE CONFIGS
 ROBOT_IPS = {
-    'base' : '192.168.5.1',
+    'base' : '172.18.0.2',
     'mr_green':'192.168.2.42',
     'prof_plum':'192.168.3.42',
     'col_mustard':'192.168.4.42',
@@ -142,7 +142,10 @@ def unpack_device(params : dict, robot_id):
         cfg.insert_json5("connect/endpoints", tcp)
     elif d == 'hunter':
         my_ip = ROBOT_IPS[params['container']]
-        cfg = zenoh.Config.from_file(f"{os.getenv("VTRROOT")}/hunter/hunter2_zenoh.json5")    
+        vtr_root = os.getenv("VTRROOT")
+        print('unpack, loading zenoh cfg')
+        cfg = zenoh.Config.from_file(f"{vtr_root}/hunter/hunter2_zenoh.json5")    
+        print('unpack, loaded zenoh cfg')
     else:
         print('unpack device: bad params/device')
 
