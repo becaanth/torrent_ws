@@ -16,6 +16,7 @@ from vtr_common_msgs.msg import LieGroupTransform
 
 import contextlib
 import pdb
+import traceback
 
 class Reconstitutor:
     """
@@ -74,7 +75,7 @@ class Reconstitutor:
 
         # make directories for VTR
         print(f'[Reconstitutor]: self.output_dir: {self.output_dir}')
-        for key, topic in self.topics.items():
+        for key, _ in self.topics.items():
             if key == 'index': 
                 os.makedirs(f'{self.output_dir}/index', exist_ok=True)
             elif key == 'edges' or key == 'vertices': 
@@ -95,7 +96,6 @@ class Reconstitutor:
         self.db_written = []
 
         # list pieces that have been previewed, but not written
-        # TODO: modify to be a dict of piece previews (robot-ids)
         self.pieces : dict[int, Piece] = {}
 
     # ============= PUBLIC =================
@@ -200,13 +200,15 @@ class Reconstitutor:
                             continue
 
                     poll_data = self._parse_piece(folder_name, db_file)
-                    if not poll_data or poll_data['vertices'].empty:
+                    if not poll_data or poll_data['pointmap'].empty:
+                        print(f"[Reconstitutor]: DEBUG poll data empty")
                         continue
 
                     # if this robot's pieces
                     if folder_name == self.robot_id:
-                        self._ingest_local_piece(poll_data)
-                        print(f"[Reconstitutor]: ingest local piece {db_file}")
+                        # self._ingest_local_piece(poll_data)
+                        # print(f"[Reconstitutor]: ingest local piece {db_file}")
+                        print(f"[Reconstitutor]: local piece, skip {db_file}")
 
                     else:
                         if not self.pieces:
@@ -215,8 +217,9 @@ class Reconstitutor:
                         print(f"[Reconstitutor]: ingest remote piece {db_file}")
 
                     self.db_written.append(db_file)
-                except:
-                    print(f"[Reconstitutor]: WARNING Could not read from {db_file}")
+                except Exception as e:
+                    print(f"[Reconstitutor]: WARNING {db_file} because {e}")
+                    traceback.print_exc()
                     continue
 
     def _parse_piece(self, folder_path: str, db_file: str):
@@ -232,8 +235,8 @@ class Reconstitutor:
             try:
                 df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
                 poll_data[table] = df
-            except:
-                print(f"[Reconstitutor]: _parse_piece exception {db_file}")
+            except Exception as e:
+                print(f"[Reconstitutor]: _parse_piece id | {db_file} | {e}")
                 poll_data[table] = pd.DataFrame() 
 
         conn.close()
@@ -296,36 +299,52 @@ class Reconstitutor:
     # ============ .db3 INTERFACE ==============
     def _init_database(self):
         """
-        initiate .db3s using topics and cursors
+        initiate .db3s using topics and cursors (attach if already exists)
         """
         for k, path in self._db_relpaths.items():
-            if os.path.exists(path):
-                os.remove(path)
-            for sidecar in (path + "-wal", path + "-shm"):
-                if os.path.exists(sidecar):
-                    os.remove(sidecar)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+
+            # if os.path.exists(path):
+            #     os.remove(path)
+            # for sidecar in (path + "-wal", path + "-shm"):
+            #     if os.path.exists(sidecar):
+            #         os.remove(sidecar)
 
             # reconnect to fresh file
             with self._open(k) as conn:
                 print(f'[Reconstitutor]: init db {k} at {self._conns[k]}, topic {self.topics[k]}')
+                existing = {
+                    row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('topics','messages')"
+                    ).fetchall()
+                }
             
-                conn.execute("""
-                    CREATE TABLE topics (
-                        id INTEGER PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        type TEXT NOT NULL,
-                        serialization_format TEXT NOT NULL,
-                        offered_qos_profiles TEXT
-                    )
-                """)
-                conn.execute("""
-                    CREATE TABLE messages (
-                        id INTEGER PRIMARY KEY,
-                        topic_id INTEGER NOT NULL,
-                        timestamp INTEGER NOT NULL,
-                        data BLOB NOT NULL
-                    )
-                """)       
+                if {'topics', 'messages'} <= existing:
+                    row = conn.execute(
+                        "SELECT id FROM topics WHERE name = ?", (k,)
+                    ).fetchone()
+                    if row is not None:
+                        self._last_rowid[k] = row[0]  # reuse existing topic_id
+                        print(f"[Reconstitutor]: attached to existing {k} (topic_id={row[0]})")
+                        continue
+                else:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS topics (
+                            id INTEGER PRIMARY KEY,
+                            name TEXT NOT NULL,
+                            type TEXT NOT NULL,
+                            serialization_format TEXT NOT NULL,
+                            offered_qos_profiles TEXT
+                        )
+                    """)
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS messages (
+                            id INTEGER PRIMARY KEY,
+                            topic_id INTEGER NOT NULL,
+                            timestamp INTEGER NOT NULL,
+                            data BLOB NOT NULL
+                        )
+                    """)       
     
                 # insert topics
                 cur = conn.execute("""
@@ -481,7 +500,7 @@ def preview_piece(piece):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = 'Script to deconstruct posegraphs submap-wise')
-    parser.add_argument('-p', '--posegraph', default='none', help="The name of the posegraph") # TODO: watch deconstructed dir generally
+    parser.add_argument('-p', '--posegraph', default='none', help="The name of the posegraph") 
     parser.add_argument('--poll_hz', type=float, default=1.0)
     parser.add_argument('--posegraph_root', default='/home/asrl/ASRL/vtr3/temp/pgs')
     parser.add_argument('--piece_root', default='/home/asrl/ASRL/vtr3/temp/pcs')
