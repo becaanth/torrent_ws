@@ -27,6 +27,7 @@ class MutableSeeder:
         # robot params
         self.container = params['container']
         self.my_ip, z_cfg = unpack_device(params, this_robot_id)
+        print("[Seeder]: unpacked config")
         self.router = params['router']
 
         # data params
@@ -41,6 +42,8 @@ class MutableSeeder:
         os.makedirs(self.input_path, exist_ok=True)
     
         # libtorrent
+        print("[Seeder]: init lt")
+
         self.t_ses = lt.session({
             "listen_interfaces": f"{self.my_ip}:6881,[::]:6881",
             "enable_dht": False,
@@ -50,8 +53,11 @@ class MutableSeeder:
         })
 
         # zenoh
+        print("[Seeder]: init zenoh")
+
         z_cfg.insert_json5("mode", '"client"')
-        z_cfg.insert_json5("listen/endpoints", "[]")
+        # z_cfg.insert_json5("listen/endpoints", "[]")
+        z_cfg.insert_json5("open/return_conditions/connect_scouted", "false")
         self.z_ses = zenoh.open(z_cfg)
 
         # mutable update
@@ -76,6 +82,8 @@ class MutableSeeder:
 
         # inversion of control callback
         self.on_torrent_updated = on_torrent_updated # -> update mutable item from remote
+        print("[Seeder]: init done")
+
 
     def run(self):
         """
@@ -84,6 +92,7 @@ class MutableSeeder:
         print(f"[Seeder]: polling at {self.poll_hz} Hz (Ctrl-C to stop)")
         try: 
             while True:
+                print(f"[Seeder]: polling")
                 self._poll()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:

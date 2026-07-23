@@ -22,6 +22,7 @@ class MutablePeer:
         self.container = params['container']
         self.peers = []
         self.my_ip, z_cfg = unpack_device(params, robot_id)
+        print("[Peer]: unpacked config")
         self.router = params['router']
         self.robot_id = robot_id
 
@@ -35,6 +36,8 @@ class MutablePeer:
         os.makedirs(self.output_path, exist_ok=True)
 
         # libtorrent
+        print("[Peer]: init lt")
+
         self.t_ses = lt.session({
             "listen_interfaces": f"{self.my_ip}:6881,[::]:6881",
             'enable_dht': False,
@@ -44,9 +47,12 @@ class MutablePeer:
         })
 
         # zenoh
+        print("[Peer]: init zenoh")
+
         self.message_queue = Queue()
         z_cfg.insert_json5("mode", '"client"')
-        z_cfg.insert_json5("listen/endpoints", "[]")
+        # z_cfg.insert_json5("listen/endpoints", "[]")
+        z_cfg.insert_json5("open/return_conditions/connect_scouted", "false")
         self.z_ses = zenoh.open(z_cfg)
         self.sub = self.z_ses.declare_subscriber("mutable_items/**", self.on_sample)
         self.last_sample = None
