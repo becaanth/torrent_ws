@@ -146,7 +146,7 @@ def unpack_device(params : dict, robot_id):
         for _, ip in ROBOT_IPS.items():
             if my_ip != ip:
                 print(f"[unpack] adding {ip} to zenoh cfg")
-                tcp = '["tcp/'+ '192.168.5.42' + ':5200"]' # ANTHONY: test
+                tcp = '["tcp/'+ ip + ':5200"]' # ANTHONY: test
                 cfg.insert_json5("connect/endpoints", tcp)
     else:
         print('unpack device: bad params/device')
