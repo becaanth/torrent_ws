@@ -10,9 +10,9 @@ from posegraph.posegraph_utils import *
 # DEVICE CONFIGS
 ROBOT_IPS = {
     'base' : '10.223.0.10', # this is Anthonys laptop; ip route get 1.1.1.1 | awk '{print $7}'
-    'mr_green':'192.168.2.42',
-    'prof_plum':'192.168.3.42',
-    'col_mustard':'192.168.4.42',
+    # 'mr_green':'192.168.2.42',
+    # 'prof_plum':'192.168.3.42',
+    # 'col_mustard':'192.168.4.42',
     'mrs_peacock':'192.168.5.42' 
 }
 
