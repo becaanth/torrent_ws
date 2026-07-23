@@ -129,27 +129,39 @@ def on_mutable_item(sample):
 
     return mutable_item
 
-def unpack_device(params : dict, robot_id):
+def unpack_device(params: dict, robot_id):
     """
-    Load IPs, Zenoh config, robot names according to a config
+    Load IPs and build explicit Zenoh listen/connect configuration.
     """
     d = params['device']
+    cfg = zenoh.Config()
 
     if d == 'docker':
+        # Docker local dev setup
         my_ip = DOCKER_IPS[f"torrent{robot_id}"]
-        cfg = zenoh.Config()
-        tcp = '["tcp/'+ params['router'] + ':7447"]'
-        cfg.insert_json5("connect/endpoints", tcp)
-    elif d == 'hunter':
-        my_ip = ROBOT_IPS[params['container']]
-        cfg = zenoh.Config()
-        for _, ip in ROBOT_IPS.items():
-            if my_ip != ip:
-                print(f"[unpack] adding {ip} to zenoh cfg")
-                tcp = '["tcp/'+ ip + ':5200"]' # ANTHONY: test
-                cfg.insert_json5("connect/endpoints", tcp)
-    else:
-        print('unpack device: bad params/device')
+        router_ip = params.get('router', '127.0.0.1')
+        cfg.insert_json5("connect/endpoints", json.dumps([f"tcp/{router_ip}:7447"]))
 
-    print(f"[unpack] my_ip {my_ip}")
+    elif d == 'hunter':
+        # Robot / Laptop host deployment setup
+        laptop_ip = ROBOT_IPS['base']  # The laptop LAN IP (e.g., 10.223.0.10)
+        
+        # Check if this node is running on the laptop host ('base') or a robot
+        is_laptop = (params.get('container') == 'base')
+
+        if is_laptop:
+            # LAPTOP SIDE: Act as the passive listener on port 5200
+            print("[unpack] Configured as LAPTOP LISTENER on tcp/0.0.0.0:5200")
+            my_ip = laptop_ip
+            cfg.insert_json5("listen/endpoints", json.dumps(["tcp/0.0.0.0:5200"]))
+        else:
+            # ROBOT SIDE: Act as active connector dialing out to Laptop IP on port 5200
+            my_ip = ROBOT_IPS[params['container']]
+            print(f"[unpack] Configured ROBOT CONNECTOR -> tcp/{laptop_ip}:5200")
+            cfg.insert_json5("connect/endpoints", json.dumps([f"tcp/{laptop_ip}:5200"]))
+
+    else:
+        raise ValueError(f"[unpack_device] Invalid device parameter: {d}")
+
+    print(f"[unpack] my_ip: {my_ip}")
     return my_ip, cfg
