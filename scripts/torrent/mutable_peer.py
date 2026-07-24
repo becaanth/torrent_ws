@@ -11,6 +11,8 @@ from .torrent_utils import *
 
 import pdb
 
+PORT = 5202
+
 class MutablePeer:
     """
     Listen to Zenoh gossip, join a torrent session
@@ -42,7 +44,7 @@ class MutablePeer:
         print("[Peer]: init lt")
 
         self.t_ses = lt.session({
-            "listen_interfaces": f"{self.my_ip}:5202,[::]:5202",
+            "listen_interfaces": f"{self.my_ip}:{PORT},[::]:{PORT}",
             'enable_dht': False,
             'alert_mask': (
                 lt.alert.category_t.all_categories
@@ -74,7 +76,7 @@ class MutablePeer:
         print(f"[Peer]: running the main loop (Ctrl-C to stop)")
         try:
             while True:
-                print(f"[Peer]: len queue = {self.message_queue.qsize()}")
+                print(f"[Peer]: len queue = {self.message_queue.qsize()}, peers {self.peers}")
                 self._flush_queue()
                 self._poll_metadata()
                 time.sleep(1.0 / self.poll_hz)
@@ -97,7 +99,12 @@ class MutablePeer:
             # check if heard own seeder
             if mutable_item['my_ip'] == self.my_ip:
                 print(f"[Peer]: WARNING flush skipping. don't leech own pieces")
-                return
+                continue
+
+            peer_endpoint = (mutable_item['my_ip'], PORT)
+            if peer_endpoint not in self.peers:
+                self.peers.append(peer_endpoint)
+                print(f"[Peer]: added {peer_endpoint} to fleet peer list ({len(self.peers)} known)")
             
             # check if new session discovered
             existing_ids = {mi['robot_id'] for _, mi in self.mutable_items.items() if 'robot_id' in mi}
@@ -111,6 +118,10 @@ class MutablePeer:
                 })
                 for ip, p in self.peers:
                     handle.connect_peer((ip, p))
+
+                for h in self.t_ses.get_torrents():
+                    if h.info_hash() != handle.info_hash():
+                        h.connect_peer(peer_endpoint)
 
                 # orchestrator callbacks
                 if self.on_torrent_discovered is not None:

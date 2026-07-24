@@ -129,6 +129,9 @@ def on_mutable_item(sample):
 
     return mutable_item
 
+
+Z_PORT=5200
+
 def unpack_device(params: dict, robot_id):
     """
     Load IPs and build explicit Zenoh listen/connect configuration.
@@ -147,16 +150,16 @@ def unpack_device(params: dict, robot_id):
         cfg = zenoh.Config()
 
         if is_laptop:
-            # LAPTOP SIDE: Listen on port 5200
-            print("[unpack] Configured as LAPTOP LISTENER on tcp/0.0.0.0:5200")
+            # LAPTOP SIDE: Listen on port {Z_PORT}
+            print(f"[unpack] Configured as LAPTOP LISTENER on tcp/0.0.0.0:{Z_PORT}")
             my_ip = laptop_ip
-            cfg.insert_json5("listen/endpoints", json.dumps(["tcp/0.0.0.0:5200"]))
+            cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{Z_PORT}"]))
             cfg.insert_json5("mode", '"peer"')
         else:
-            # ROBOT SIDE: Connect out to Laptop IP on port 5200
+            # ROBOT SIDE: Connect out to Laptop IP on port {Z_PORT}
             my_ip = ROBOT_IPS[params['container']]
-            print(f"[unpack] Configured ROBOT CONNECTOR -> tcp/{laptop_ip}:5200")
-            cfg.insert_json5("connect/endpoints", json.dumps([f"tcp/{laptop_ip}:5200"]))
+            print(f"[unpack] Configured ROBOT CONNECTOR -> tcp/{laptop_ip}:{Z_PORT}")
+            cfg.insert_json5("connect/endpoints", json.dumps([f"tcp/{laptop_ip}:{Z_PORT}"]))
             cfg.insert_json5("mode", '"client"')
             # Do not exit/crash if the endpoint isn't immediately reachable
             cfg.insert_json5("connect/exit_on_failure", "false")

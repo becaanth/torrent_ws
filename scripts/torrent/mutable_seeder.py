@@ -15,6 +15,7 @@ import pdb
 
 # zenohd --cfg 'scouting/multicast/enabled:false'
 
+PORT=5202
 
 class MutableSeeder:
     """
@@ -46,7 +47,7 @@ class MutableSeeder:
         print("[Seeder]: init lt")
 
         self.t_ses = lt.session({
-            "listen_interfaces": f"{self.my_ip}:5202,[::]:5202",
+            "listen_interfaces": f"{self.my_ip}:{PORT},[::]:{PORT}",
             "enable_dht": False,
             "alert_mask": (
                 lt.alert.category_t.all_categories
@@ -88,7 +89,7 @@ class MutableSeeder:
         print(f"[Seeder]: polling at {self.poll_hz} Hz (Ctrl-C to stop)")
         try: 
             while True:
-                print(f"[Seeder]: polling")
+                print(f"[Seeder]: polling peers")
                 self._poll()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
