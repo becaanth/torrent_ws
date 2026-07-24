@@ -42,7 +42,7 @@ class MutablePeer:
         print("[Peer]: init lt")
 
         self.t_ses = lt.session({
-            "listen_interfaces": f"{self.my_ip}:6881,[::]:6881",
+            "listen_interfaces": f"{self.my_ip}:5202,[::]:5202",
             'enable_dht': False,
             'alert_mask': (
                 lt.alert.category_t.all_categories
