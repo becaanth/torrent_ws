@@ -26,6 +26,9 @@ DOCKER_IPS = {
     'torrent8':'172.18.0.3',
 }
 
+Z_PORT=5203
+
+
 # -------------------------
 # Persistence
 # -------------------------
@@ -130,7 +133,6 @@ def on_mutable_item(sample):
     return mutable_item
 
 
-Z_PORT=5200
 
 def unpack_device(params: dict, robot_id):
     """

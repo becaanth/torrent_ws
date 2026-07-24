@@ -15,7 +15,7 @@ import pdb
 
 # zenohd --cfg 'scouting/multicast/enabled:false'
 
-PORT=5202
+PORT=5204
 
 class MutableSeeder:
     """
