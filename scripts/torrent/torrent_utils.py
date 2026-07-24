@@ -158,6 +158,10 @@ def unpack_device(params: dict, robot_id):
             print(f"[unpack] Configured ROBOT CONNECTOR -> tcp/{laptop_ip}:5200")
             cfg.insert_json5("connect/endpoints", json.dumps([f"tcp/{laptop_ip}:5200"]))
             cfg.insert_json5("mode", '"client"')
+            # Do not exit/crash if the endpoint isn't immediately reachable
+            cfg.insert_json5("connect/exit_on_failure", "false")
+            # Set timeout to -1 so it retries connection indefinitely in background
+            cfg.insert_json5("connect/timeout_ms", "-1")
 
     else:
         raise ValueError(f"[unpack_device] Invalid device parameter: {d}")

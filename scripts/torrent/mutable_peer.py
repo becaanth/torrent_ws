@@ -15,13 +15,16 @@ class MutablePeer:
     """
     Listen to Zenoh gossip, join a torrent session
     """
-    def __init__(self, params : dict, state : dict, robot_id, poll_hz : float = 0.5,
+    def __init__(self, params : dict, state : dict, robot_id, z_ses, my_ip, poll_hz : float = 0.5,
                  on_torrent_discovered=None, on_metadata_received=None, on_torrent_updated=None):
         
         # robot params
         self.container = params['container']
         self.peers = []
-        self.my_ip, z_cfg = unpack_device(params, robot_id)
+
+        self.my_ip = my_ip
+        self.z_ses = z_ses
+
         print("[Peer]: unpacked config")
         self.router = params['router']
         self.robot_id = robot_id
@@ -50,10 +53,6 @@ class MutablePeer:
         print("[Peer]: init zenoh")
 
         self.message_queue = Queue()
-        z_cfg.insert_json5("mode", '"client"')
-        # z_cfg.insert_json5("listen/endpoints", "[]")
-        z_cfg.insert_json5("open/return_conditions/connect_scouted", "false")
-        self.z_ses = zenoh.open(z_cfg)
         self.sub = self.z_ses.declare_subscriber("mutable_items/**", self.on_sample)
         self.last_sample = None
         

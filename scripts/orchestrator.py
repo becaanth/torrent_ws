@@ -2,7 +2,9 @@ from posegraph.live_deconstitution import Deconstitutor
 from posegraph.live_reconstitution import Reconstitutor
 from torrent.mutable_seeder import MutableSeeder
 from torrent.mutable_peer import MutablePeer
+from torrent.torrent_utils import unpack_device
 
+import zenoh
 import argparse
 import json
 import os
@@ -35,6 +37,11 @@ class Orchestrator:
 
         print(f"[Orchestrator]: init with id {robot_id}, posegraph {posegraph}")
 
+        # zenoh session for this device
+        self.my_ip, z_cfg = unpack_device(seeder_params, self.robot_id)
+        z_cfg.insert_json5("open/return_conditions/connect_scouted", "false")
+        self.z_ses = zenoh.open(z_cfg)
+
         # posegraph -> pieces
         self.dec = Deconstitutor(
             input_dir=source_pg,
@@ -49,7 +56,9 @@ class Orchestrator:
             params=seeder_params,
             this_robot_id=self.robot_id,
             robot_id=self.robot_id,
-            state=state
+            state=state,
+            z_ses=self.z_ses,
+            my_ip=self.my_ip
         )
         self.fleet = {}
         self.fleet[self.robot_id] = mutable_seeder
@@ -60,6 +69,8 @@ class Orchestrator:
             params=peer_params,
             state=state,
             robot_id=robot_id,
+            z_ses=self.z_ses,
+            my_ip=self.my_ip,
             on_torrent_discovered=self.handle_torrent_discovered,
             on_metadata_received=self.handle_metadata_received,
             on_torrent_updated=self.handle_torrent_update
@@ -81,7 +92,9 @@ class Orchestrator:
             this_robot_id=self.robot_id,
             robot_id=robot_id,
             mutable_item=mutable_item,
-            state=state
+            state=state,
+            z_ses=self.z_ses,
+            my_ip=self.my_ip
         )
         self.fleet[robot_id] = mutable_seeder
         new_thread = threading.Thread(target=self.fleet[robot_id].run, daemon=True)

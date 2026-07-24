@@ -23,10 +23,11 @@ class MutableSeeder:
     1) update Zenoh discovery messages and broadcast
     2) seed the immutable snapshots
     """
-    def __init__(self, params : dict, this_robot_id : int, robot_id : int, state : dict, mutable_item = None, poll_hz : float = 0.2, on_torrent_updated=None):
+    def __init__(self, params : dict, this_robot_id : int, robot_id : int, state : dict, z_ses, my_ip, mutable_item = None, poll_hz : float = 0.2, on_torrent_updated=None):
         # robot params
         self.container = params['container']
-        self.my_ip, z_cfg = unpack_device(params, this_robot_id)
+        self.my_ip = my_ip
+        self.z_ses = z_ses
         print("[Seeder]: unpacked config")
         self.router = params['router']
 
@@ -54,11 +55,6 @@ class MutableSeeder:
 
         # zenoh
         print("[Seeder]: init zenoh")
-
-        z_cfg.insert_json5("mode", '"client"')
-        # z_cfg.insert_json5("listen/endpoints", "[]")
-        z_cfg.insert_json5("open/return_conditions/connect_scouted", "false")
-        self.z_ses = zenoh.open(z_cfg)
 
         # mutable update
         sk = SigningKey(bytes.fromhex(self.state["sk"]))
