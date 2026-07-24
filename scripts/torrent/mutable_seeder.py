@@ -125,6 +125,11 @@ class MutableSeeder:
             status = handle.status()
             
             print(f"\t[Seeder]: Progress: {status.progress*100:.1f}% | Peers: {status.num_peers} | Down: {status.download_rate/1000:.1f} KB/s")
+            for a in self.t_ses.pop_alerts():
+                if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
+                       lt.peer_error_alert, lt.listen_failed_alert,
+                       lt.listen_succeeded_alert, lt.incoming_connection_alert)):
+                    print(f"[Seeder] alert: {a}")
 
     def create_snapshot(self):
         """

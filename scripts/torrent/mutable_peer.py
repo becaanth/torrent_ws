@@ -149,6 +149,8 @@ class MutablePeer:
                                     'save_path': self.output_path
                                 })
                                 for ip, p in self.peers:
+                                    print(f"[Peer]: attempting connect_peer to {peer_endpoint}")
+                                    handle.connect_peer(peer_endpoint)
                                     handle.connect_peer((ip, p))
                         except:
                             print("[Peer]: no torrent info")
@@ -157,6 +159,11 @@ class MutablePeer:
         for handle in self.t_ses.get_torrents():
             s = handle.status()
             print(f"[Peer]: progress {s.progress*100:.1f}%")
+            for a in self.t_ses.pop_alerts():
+                if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
+                                lt.peer_error_alert, lt.metadata_failed_alert,
+                                lt.metadata_received_alert)):
+                    print(f"[Peer] alert: {a}")
 
         # for _, mi in self.mutable_items.items():
         #     print(f"[Peer]: item \n{mutable_to_string(mi)})")
