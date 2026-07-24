@@ -44,11 +44,11 @@ class MutablePeer:
         print("[Peer]: init lt")
 
         self.t_ses = lt.session({
-            "listen_interfaces": f"{self.my_ip}:{PORT},[::]:{PORT}",
-            'enable_dht': False,
-            'alert_mask': (
-                lt.alert.category_t.all_categories
-            )
+            "listen_interfaces": f"0.0.0.0:{PORT},[::]:{PORT}",
+            "enable_dht": False,
+            "enable_outgoing_utp": False,
+            "enable_incoming_utp": False,
+            "alert_mask": lt.alert.category_t.all_categories,
         })
 
         # zenoh

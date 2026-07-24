@@ -47,11 +47,11 @@ class MutableSeeder:
         print("[Seeder]: init lt")
 
         self.t_ses = lt.session({
-            "listen_interfaces": f"{self.my_ip}:{PORT},[::]:{PORT}",
+            "listen_interfaces": f"0.0.0.0:{PORT},[::]:{PORT}",
             "enable_dht": False,
-            "alert_mask": (
-                lt.alert.category_t.all_categories
-            ),
+            "enable_outgoing_utp": False,
+            "enable_incoming_utp": False,
+            "alert_mask": lt.alert.category_t.all_categories,
         })
 
         # zenoh
