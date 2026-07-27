@@ -53,6 +53,7 @@ class MutablePeer:
         
         # mutable updates
         self.mutable_items = {}
+        self.torrent_handles = {}
 
         # inversion of control callbacks
         self.on_torrent_discovered = on_torrent_discovered # spawn MutableSeeder 
@@ -109,6 +110,7 @@ class MutablePeer:
                     'info_hash': mutable_item['infohash'],
                     'save_path': self.output_path
                 })
+                self.torrent_handles[robot_id] = handle
                 for ip, p in self.peers:
                     handle.connect_peer((ip, p))
 
@@ -133,20 +135,27 @@ class MutablePeer:
                         self.on_torrent_updated(robot_id, mutable_item)
 
                     # remove old torrent
-                    for active_handle in self.t_ses.get_torrents():
-                        try:                        
-                            if active_handle.get_torrent_info().info_hash().to_bytes() == saved_mi['infohash']:
-                                self.t_ses.remove_torrent(active_handle)
-                                handle = self.t_ses.add_torrent({
-                                    'info_hash': mutable_item['infohash'],
-                                    'save_path': self.output_path
-                                })
-                                for ip, p in self.peers:
-                                    print(f"[Peer]: attempting connect_peer to {peer_endpoint}")
-                                    handle.connect_peer(peer_endpoint)
-                                    handle.connect_peer((ip, p))
-                        except:
-                            print("[Peer]: no torrent info")
+                    old_handle = self.torrent_handles.get(robot_id)
+                    if old_handle is not None and old_handle.is_valid():
+                        current_infohash = old_handle.info_hash().to_bytes()
+                        # if same infohash
+                        for ip, p in self.peers:
+                            old_handle.connect_peer((ip,p))
+                        continue
+
+                    if old_handle is not None and old_handle.is_valid():
+                        print(f"[Peer]: Infohash updated for robot {robot_id}. Replacing torrent handle.")
+                        self.t_ses.remove_torrent(old_handle)
+
+                    new_handle = self.t_ses.add_torrent({
+                        'info_hash': mutable_item['infohash'],
+                        'save_path': self.output_path
+                    })
+                    self.torrent_handles[robot_id] = new_handle
+
+                    for ip, p, in self.peer:
+                        print(f"[Peer]: attempting connect_peer to {(ip, p)}")
+                        new_handle.connect_peer((ip, p))
 
         # Monitor existing torrents
         for handle in self.t_ses.get_torrents():
