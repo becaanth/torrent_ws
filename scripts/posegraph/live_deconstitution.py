@@ -170,7 +170,6 @@ class Deconstitutor:
         """Read new rows from all sources, then write any new chunks."""
         print(f"[Deconstitutor]: polling")
         conn = self._get_conn('index')
-        print(f"[Deconstitutor]: conn {conn}")
         if conn is not None:
             try:
                 self._index_df = _read_full_df(conn)
@@ -188,7 +187,6 @@ class Deconstitutor:
         self._ingest_new_rows('env_info',      None)
 
         if self._index_df is not None and not self._index_df.empty:
-            print(f"[Deconstitutor]: write new chunks")
             self._write_new_chunks(self.robot_id)
         else:
             print("[Deconstitutor]: Delaying chunk writing, waiting for valid index structure.")
