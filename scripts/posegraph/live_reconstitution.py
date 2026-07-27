@@ -201,7 +201,7 @@ class Reconstitutor:
 
                     poll_data = self._parse_piece(folder_name, db_file)
                     if not poll_data or poll_data['pointmap'].empty:
-                        print(f"[Reconstitutor]: DEBUG poll data empty")
+                        # print(f"[Reconstitutor]: DEBUG poll data empty")
                         continue
 
                     # if this robot's pieces
