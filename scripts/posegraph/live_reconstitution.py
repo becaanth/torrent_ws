@@ -236,7 +236,7 @@ class Reconstitutor:
                 df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
                 poll_data[table] = df
             except Exception as e:
-                print(f"[Reconstitutor]: _parse_piece id | {db_file} | {e}")
+                # print(f"[Reconstitutor]: _parse_piece id | {db_file} | {e}")
                 poll_data[table] = pd.DataFrame() 
 
         conn.close()
