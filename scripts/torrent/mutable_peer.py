@@ -182,6 +182,7 @@ class MutablePeer:
                 metadata = info.metadata()
                 # find associated robot_id
                 infohash = info.info_hash().to_bytes()
+                robot_id = None
                 for rid, mi in self.mutable_items.items():
                     if mi['infohash']==infohash:
                         robot_id = rid
