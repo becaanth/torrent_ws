@@ -24,7 +24,7 @@ class MutableSeeder:
     1) update Zenoh discovery messages and broadcast
     2) seed the immutable snapshots
     """
-    def __init__(self, params : dict, this_robot_id : int, robot_id : int, state : dict, z_ses, my_ip, mutable_item = None, poll_hz : float = 0.2, on_torrent_updated=None):
+    def __init__(self, params : dict, posegraph : str, this_robot_id : int, robot_id : int, state : dict, z_ses, my_ip, mutable_item = None, poll_hz : float = 0.2, on_torrent_updated=None):
         # robot params
         self.container = params['container']
         self.my_ip = my_ip
@@ -33,7 +33,7 @@ class MutableSeeder:
         self.router = params['router']
 
         # data params
-        self.posegraph = params['posegraph']
+        self.posegraph = posegraph
         self.this_robot_id = int(this_robot_id)
         self.robot_id = int(robot_id)
         self.state = state

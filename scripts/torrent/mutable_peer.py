@@ -17,7 +17,7 @@ class MutablePeer:
     """
     Listen to Zenoh gossip, join a torrent session
     """
-    def __init__(self, params : dict, state : dict, robot_id, z_ses, my_ip, poll_hz : float = 0.5,
+    def __init__(self, params : dict, posegraph : str, state : dict, robot_id, z_ses, my_ip, poll_hz : float = 0.5,
                  on_torrent_discovered=None, on_metadata_received=None, on_torrent_updated=None):
         
         # robot params
@@ -32,7 +32,7 @@ class MutablePeer:
         self.robot_id = robot_id
 
         # data params
-        self.posegraph = params['posegraph']
+        self.posegraph = posegraph
         self.state = state
 
         # file system

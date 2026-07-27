@@ -34,6 +34,7 @@ class Orchestrator:
         rcv_pg = f"{VTRTEMP}/pgs/{posegraph}/graph" # output posegraph from rec
         
         self.robot_id = robot_id
+        self.posegraph = posegraph
 
         print(f"[Orchestrator]: init with id {robot_id}, posegraph {posegraph}")
 
@@ -54,6 +55,7 @@ class Orchestrator:
         # dict of {'robot_id' : robot_id, 'seed' : mutable_seeder}
         mutable_seeder = MutableSeeder(
             params=seeder_params,
+            posegraph=self.posegraph,
             this_robot_id=self.robot_id,
             robot_id=self.robot_id,
             state=state,
@@ -67,6 +69,7 @@ class Orchestrator:
         self.metadata = {}
         self.peer = MutablePeer(
             params=peer_params,
+            posegraph=self.posegraph,
             state=state,
             robot_id=robot_id,
             z_ses=self.z_ses,
@@ -89,6 +92,7 @@ class Orchestrator:
         print(f"[Orchestrator]: handle_torrent_discovered, id {robot_id}")
         mutable_seeder = MutableSeeder(
             params=seeder_params,
+            posegraph=self.posegraph,
             this_robot_id=self.robot_id,
             robot_id=robot_id,
             mutable_item=mutable_item,
