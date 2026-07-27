@@ -190,7 +190,7 @@ class MutablePeer:
 
                 # orchestrator callback
                 if self.on_metadata_received is not None:
-                    if robot_id is not None or metadata is not None:
+                    if robot_id is not None and metadata is not None:
                         self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
                     
                     print(f"[Peer] poll_metadata updated for robot {robot_id}")
