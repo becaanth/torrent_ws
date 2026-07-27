@@ -54,6 +54,7 @@ class MutablePeer:
         # mutable updates
         self.mutable_items = {}
         self.torrent_handles = {}
+        self.processed_metadata_hashes = set()  # Track infohashes we've already handled
 
         # inversion of control callbacks
         self.on_torrent_discovered = on_torrent_discovered # spawn MutableSeeder 
@@ -111,12 +112,10 @@ class MutablePeer:
                     'save_path': self.output_path
                 })
                 self.torrent_handles[robot_id] = handle
+
+                # connect handle to known peers
                 for ip, p in self.peers:
                     handle.connect_peer((ip, p))
-
-                for h in self.t_ses.get_torrents():
-                    if h.info_hash() != handle.info_hash():
-                        h.connect_peer(peer_endpoint)
 
                 # orchestrator callbacks
                 if self.on_torrent_discovered is not None:
@@ -136,24 +135,26 @@ class MutablePeer:
 
                     # remove old torrent
                     old_handle = self.torrent_handles.get(robot_id)
-                    if old_handle is not None and old_handle.is_valid():
-                        current_infohash = old_handle.info_hash().to_bytes()
-                        # if same infohash
-                        for ip, p in self.peers:
-                            old_handle.connect_peer((ip,p))
-                        continue
 
                     if old_handle is not None and old_handle.is_valid():
-                        print(f"[Peer]: Infohash updated for robot {robot_id}. Replacing torrent handle.")
-                        self.t_ses.remove_torrent(old_handle)
+                        old_hash = bytes(old_handle.info_hash().to_bytes())
+                        new_hash = bytes(mutable_item['infohash'])
 
+                        if old_hash == new_hash:
+                            # infohash has not changes
+                            continue
+
+                        print(f"[Peer]: infohash updated for robot_id {robot_id}, replacing handle")
+                        self.processed_metadata_hashes.discard(old_hash)
+                        self.t_ses.remove_torrent(old_handle, lt.remove_flags_t.delete_files)
+                        
                     new_handle = self.t_ses.add_torrent({
                         'info_hash': mutable_item['infohash'],
                         'save_path': self.output_path
                     })
                     self.torrent_handles[robot_id] = new_handle
 
-                    for ip, p, in self.peer:
+                    for ip, p in self.peers:
                         print(f"[Peer]: attempting connect_peer to {(ip, p)}")
                         new_handle.connect_peer((ip, p))
 
@@ -167,33 +168,44 @@ class MutablePeer:
                                 lt.metadata_received_alert)):
                     print(f"[Peer] alert: {a}")
 
-        # for _, mi in self.mutable_items.items():
-        #     print(f"[Peer]: item \n{mutable_to_string(mi)})")
-
     def _poll_metadata(self):
         """
         torrent sessions don't immediately have metadata available.
         waiting in flush_queue blocks the thread
         """
         for handle in self.t_ses.get_torrents():
-            if handle.has_metadata():
-                # get torrent info (metadata)
-                info = handle.get_torrent_info()
-                metadata = info.metadata()
-                # find associated robot_id
-                infohash = info.info_hash().to_bytes()
-                robot_id = None
-                for rid, mi in self.mutable_items.items():
-                    if mi['infohash']==infohash:
-                        robot_id = rid
-                        break
+            if not handle.has_metadata():
+                continue
 
-                # orchestrator callback
-                if self.on_metadata_received is not None:
-                    if robot_id is not None and metadata is not None:
-                        self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
-                    
-                    print(f"[Peer] poll_metadata updated for robot {robot_id}")
+
+            # get torrent info (metadata)
+            info = handle.get_torrent_info()
+            infohash_bytes = bytes(info.info_hash().to_bytes())
+            
+            if infohash_bytes in self.processed_metadata_hashes:
+                continue
+
+            # find associated robot_id
+            robot_id = None
+            for rid, mi in self.mutable_items.items():
+                mi_hash =  mi['infohash']
+                if isinstance(mi_hash, (bytearray, memoryview)):
+                    mi_hash = bytes(mi_hash)
+
+                if mi_hash == infohash_bytes:
+                    robot_id = rid
+                    break
+            
+            if robot_id is None:
+                continue
+
+            metadata = info.metadata()
+
+            # orchestrator callback
+            if metadata and self.on_metadata_received:
+                print(f"[Peer] poll_metadata updated for robot {robot_id}")
+                self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
+                self.processed_metadata_hashes.add(infohash_bytes)               
 
     def on_sample(self, sample):
         print("[Peer]: Received Zenoh message")
