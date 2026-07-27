@@ -5,12 +5,15 @@ from torrent.mutable_peer import MutablePeer
 from torrent.torrent_utils import unpack_device
 
 import zenoh
+import libtorrent as lt
 import argparse
 import json
 import os
 
 import threading
 import logging
+
+LT_PORT = 5204
 
 class Orchestrator:
     """
@@ -42,6 +45,16 @@ class Orchestrator:
         self.my_ip, z_cfg = unpack_device(seeder_params, self.robot_id)
         z_cfg.insert_json5("open/return_conditions/connect_scouted", "false")
         self.z_ses = zenoh.open(z_cfg)
+
+        # libtorrent session for this device
+        self.t_ses = lt.session({
+            "listen_interfaces": f"0.0.0.0:{LT_PORT},[::]:{LT_PORT}",
+            "enable_dht": False,
+            "enable_outgoing_utp": False,
+            "enable_incoming_utp": False,
+            "alert_mask": lt.alert.category_t.all_categories,
+        })
+
 
         # posegraph -> pieces
         self.dec = Deconstitutor(

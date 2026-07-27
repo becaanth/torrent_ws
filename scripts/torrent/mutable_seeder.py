@@ -24,7 +24,7 @@ class MutableSeeder:
     1) update Zenoh discovery messages and broadcast
     2) seed the immutable snapshots
     """
-    def __init__(self, params : dict, posegraph : str, this_robot_id : int, robot_id : int, state : dict, z_ses, my_ip, mutable_item = None, poll_hz : float = 0.2, on_torrent_updated=None):
+    def __init__(self, params : dict, posegraph : str, this_robot_id : int, robot_id : int, state : dict, z_ses, t_ses, my_ip, mutable_item = None, poll_hz : float = 0.2, on_torrent_updated=None):
         # robot params
         self.container = params['container']
         self.my_ip = my_ip
@@ -45,14 +45,7 @@ class MutableSeeder:
     
         # libtorrent
         print("[Seeder]: init lt")
-
-        self.t_ses = lt.session({
-            "listen_interfaces": f"0.0.0.0:{PORT},[::]:{PORT}",
-            "enable_dht": False,
-            "enable_outgoing_utp": False,
-            "enable_incoming_utp": False,
-            "alert_mask": lt.alert.category_t.all_categories,
-        })
+        self.t_ses = t_ses
 
         # zenoh
         print("[Seeder]: init zenoh")

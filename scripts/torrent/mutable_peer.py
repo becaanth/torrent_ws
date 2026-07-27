@@ -17,7 +17,7 @@ class MutablePeer:
     """
     Listen to Zenoh gossip, join a torrent session
     """
-    def __init__(self, params : dict, posegraph : str, state : dict, robot_id, z_ses, my_ip, poll_hz : float = 0.5,
+    def __init__(self, params : dict, posegraph : str, state : dict, robot_id, z_ses, t_ses, my_ip, poll_hz : float = 0.5,
                  on_torrent_discovered=None, on_metadata_received=None, on_torrent_updated=None):
         
         # robot params
@@ -42,14 +42,7 @@ class MutablePeer:
 
         # libtorrent
         print("[Peer]: init lt")
-
-        self.t_ses = lt.session({
-            "listen_interfaces": f"0.0.0.0:{PORT},[::]:{PORT}",
-            "enable_dht": False,
-            "enable_outgoing_utp": False,
-            "enable_incoming_utp": False,
-            "alert_mask": lt.alert.category_t.all_categories,
-        })
+        self.t_ses = t_ses
 
         # zenoh
         print("[Peer]: init zenoh")
