@@ -146,7 +146,7 @@ class MutablePeer:
 
                         print(f"[Peer]: infohash updated for robot_id {robot_id}, replacing handle")
                         self.processed_metadata_hashes.discard(old_hash)
-                        self.t_ses.remove_torrent(old_handle, lt.remove_flags_t.delete_files)
+                        self.t_ses.remove_torrent(old_handle)
                         
                     new_handle = self.t_ses.add_torrent({
                         'info_hash': mutable_item['infohash'],
