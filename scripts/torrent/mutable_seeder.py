@@ -46,6 +46,7 @@ class MutableSeeder:
         # libtorrent
         print("[Seeder]: init lt")
         self.t_ses = t_ses
+        self.current_handle = None
 
         # zenoh
         print("[Seeder]: init zenoh")
@@ -100,7 +101,12 @@ class MutableSeeder:
             # create snapshot of pcs dir
             ti = self.create_snapshot()
             infohash = ti.info_hash()
-            handle = self.t_ses.add_torrent({"ti" : ti, "save_path" : os.path.dirname(self.input_path)})
+            new_handle = self.t_ses.add_torrent({"ti" : ti, "save_path" : os.path.dirname(self.input_path)})
+            if self.current_handle is not None:
+                 self.current_handle.pause()
+                 self.t_ses.remove_torrent(self.current_handle)
+            self.current_handle = new_handle
+            
             print(f"[Seeder]: snapshot created with hash {ti}")
 
             # update mutable item if authority

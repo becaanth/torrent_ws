@@ -146,7 +146,9 @@ class MutablePeer:
 
                         print(f"[Peer]: infohash updated for robot_id {robot_id}, replacing handle")
                         self.processed_metadata_hashes.discard(old_hash)
+                        old_handle.pause()
                         self.t_ses.remove_torrent(old_handle)
+                        self.torrent_handles.pop(robot_id, None)
                         
                     new_handle = self.t_ses.add_torrent({
                         'info_hash': mutable_item['infohash'],
@@ -160,8 +162,16 @@ class MutablePeer:
 
         # Monitor existing torrents
         for handle in self.t_ses.get_torrents():
+            if not handle.is_valid():
+                print(f"[Peer]: handle is invalid")
+                continue
+
             s = handle.status()
-            print(f"[Peer]: progress {s.progress*100:.1f}%")
+            if s.paused or s.state == lt.torrent_statis.states.queued_for_checking:
+                print(f"[Peer]: handle is paused")
+                continue
+            
+            print(f"[Peer]: progress {s.progress*100:.1f}%, handle {handle.info_hash()}")
             for a in self.t_ses.pop_alerts():
                 if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
                                 lt.peer_error_alert, lt.metadata_failed_alert,
