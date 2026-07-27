@@ -167,10 +167,10 @@ class MutablePeer:
                 continue
 
             s = handle.status()
-            if s.paused or s.state == lt.torrent_statis.states.queued_for_checking:
+            if s.paused or s.state == lt.torrent_status.states.queued_for_checking:
                 print(f"[Peer]: handle is paused")
                 continue
-            
+
             print(f"[Peer]: progress {s.progress*100:.1f}%, handle {handle.info_hash()}")
             for a in self.t_ses.pop_alerts():
                 if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
