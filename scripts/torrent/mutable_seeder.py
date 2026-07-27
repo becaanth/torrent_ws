@@ -113,6 +113,7 @@ class MutableSeeder:
             # pub gossip over Zenoh
             print(f"[Seeder]: pub mutable item \n{mutable_to_string(self.mi)}")
             payload = msgpack.packb(self.mi, use_bin_type=True)
+            print(f"[Seeder]: putting zenoh item for {self.robot_id}")
             self.z_ses.put(f"mutable_items/{self.robot_id}", payload)      
             handle = self.t_ses.get_torrents()[0]
             status = handle.status()
