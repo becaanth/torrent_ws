@@ -73,6 +73,7 @@ class Orchestrator:
             robot_id=self.robot_id,
             state=state,
             z_ses=self.z_ses,
+            t_ses=self.t_ses,
             my_ip=self.my_ip
         )
         self.fleet = {}
@@ -86,6 +87,7 @@ class Orchestrator:
             state=state,
             robot_id=robot_id,
             z_ses=self.z_ses,
+            t_ses=self.t_ses,
             my_ip=self.my_ip,
             on_torrent_discovered=self.handle_torrent_discovered,
             on_metadata_received=self.handle_metadata_received,
@@ -111,6 +113,7 @@ class Orchestrator:
             mutable_item=mutable_item,
             state=state,
             z_ses=self.z_ses,
+            t_ses=self.t_ses,
             my_ip=self.my_ip
         )
         self.fleet[robot_id] = mutable_seeder
