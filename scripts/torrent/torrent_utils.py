@@ -160,9 +160,9 @@ def unpack_device(params: dict, robot_id):
         else:
             # ROBOT SIDE: Connect out to Laptop IP on port {Z_PORT}
             my_ip = ROBOT_IPS[params['container']]
-            print(f"[unpack] Configured ROBOT CONNECTOR -> tcp/{laptop_ip}:{Z_PORT}")
-            cfg.insert_json5("connect/endpoints", json.dumps([f"tcp/{laptop_ip}:{Z_PORT}"]))
-            cfg.insert_json5("mode", '"client"')
+            print(f"[unpack] Configured ROBOT CONNECTOR -> tcp/0.0.0.0:{Z_PORT}")
+            cfg.insert_json5("connect/endpoints", json.dumps([f"tcp/0.0.0.0:{Z_PORT}"]))
+            cfg.insert_json5("mode", '"peer"')
             # Do not exit/crash if the endpoint isn't immediately reachable
             cfg.insert_json5("connect/exit_on_failure", "false")
             # Set timeout to -1 so it retries connection indefinitely in background

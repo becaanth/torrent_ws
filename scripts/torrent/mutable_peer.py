@@ -88,7 +88,6 @@ class MutablePeer:
         # Check for new messages (non-blocking)
         while not self.message_queue.empty():
             sample = self.message_queue.get()
-            
             mutable_item = on_mutable_item(sample)
             print(f"[Peer]: mutable item received \n {mutable_to_string(mutable_item)}")
 
@@ -225,6 +224,7 @@ class MutablePeer:
 
     def on_sample(self, sample):
         print("[Peer]: Received Zenoh message")
+        
         if sample != self.last_sample:
             self.message_queue.put(sample)
             self.last_sample = sample
