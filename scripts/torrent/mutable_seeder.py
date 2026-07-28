@@ -121,16 +121,21 @@ class MutableSeeder:
                 
         if self.start_flag:
             # pub gossip over Zenoh
-            print(f"[Seeder]: pub mutable item \n{mutable_to_string(self.mi)}")
             payload = msgpack.packb(self.mi, use_bin_type=True)
             print(f"[Seeder]: putting zenoh item for {self.robot_id}")
             self.z_ses.put(f"mutable_items/{self.robot_id}", payload)     
             with self.t_lock: 
-                handle = self.t_ses.get_torrents()[0]
-            status = handle.status()
+                for handle in self.t_ses.get_torrents():
+                    s = handle.status()
+                    print(f"[Robot Seeder Check]:")
+                    print(f"  Infohash: {handle.info_hash()}")
+                    print(f"  Is Valid: {handle.is_valid()}")
+                    print(f"  State:    {s.state}")        # Looking for 'seeding' vs 'checking_files' vs 'error'
+                    print(f"  Paused:   {s.paused}")       # Must be False
+                    print(f"  Error:    {s.errc}")         # Should be 0 / None
+                    print(f"  Has Metadata: {handle.has_metadata()}")
             
-            print(f"\t[Seeder]: Progress: {status.progress*100:.1f}% | Peers: {status.num_peers} | Down: {status.download_rate/1000:.1f} KB/s")
-            with self.t_lock:
+                print(f"[Seeder]: Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
                 for a in self.t_ses.pop_alerts():
                     if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
                         lt.peer_error_alert, lt.listen_failed_alert,
