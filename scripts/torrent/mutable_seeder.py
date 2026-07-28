@@ -109,6 +109,7 @@ class MutableSeeder:
                     "save_path" : os.path.dirname(self.input_path), 
                     "flags": lt.torrent_flags.seed_mode
                 })
+                new_handle.unset_flags(lt.torrent_flags.paused | lt.torrent_flags.auto_managed)
             if self.current_handle is not None:
                  self.current_handle.pause()
                  with self.t_lock:
