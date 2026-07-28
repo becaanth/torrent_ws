@@ -24,7 +24,7 @@ class MutableSeeder:
     1) update Zenoh discovery messages and broadcast
     2) seed the immutable snapshots
     """
-    def __init__(self, params : dict, posegraph : str, this_robot_id : int, robot_id : int, state : dict, z_ses, t_ses, my_ip, mutable_item = None, poll_hz : float = 0.2, on_torrent_updated=None):
+    def __init__(self, params : dict, posegraph : str, this_robot_id : int, robot_id : int, state : dict, z_ses, t_ses, t_lock, my_ip, mutable_item = None, poll_hz : float = 0.2, on_torrent_updated=None):
         # robot params
         self.container = params['container']
         self.my_ip = my_ip
@@ -40,12 +40,14 @@ class MutableSeeder:
 
         # file system
         self.input_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}_{self.this_robot_id}/{self.robot_id}"
+        print(f"[Seeder]: input path {self.input_path}")
         self.bencoded_torrent_dict = {}
         os.makedirs(self.input_path, exist_ok=True)
     
         # libtorrent
         print("[Seeder]: init lt")
         self.t_ses = t_ses
+        self.t_lock = t_lock
         self.current_handle = None
 
         # zenoh
@@ -101,10 +103,12 @@ class MutableSeeder:
             # create snapshot of pcs dir
             ti = self.create_snapshot()
             infohash = ti.info_hash()
-            new_handle = self.t_ses.add_torrent({"ti" : ti, "save_path" : os.path.dirname(self.input_path)})
+            with self.t_lock:
+                new_handle = self.t_ses.add_torrent({"ti" : ti, "save_path" : os.path.dirname(self.input_path)})
             if self.current_handle is not None:
                  self.current_handle.pause()
-                 self.t_ses.remove_torrent(self.current_handle)
+                 with self.t_lock:
+                    self.t_ses.remove_torrent(self.current_handle)
             self.current_handle = new_handle
             
             print(f"[Seeder]: snapshot created with hash {ti}")
@@ -120,16 +124,18 @@ class MutableSeeder:
             print(f"[Seeder]: pub mutable item \n{mutable_to_string(self.mi)}")
             payload = msgpack.packb(self.mi, use_bin_type=True)
             print(f"[Seeder]: putting zenoh item for {self.robot_id}")
-            self.z_ses.put(f"mutable_items/{self.robot_id}", payload)      
-            handle = self.t_ses.get_torrents()[0]
+            self.z_ses.put(f"mutable_items/{self.robot_id}", payload)     
+            with self.t_lock: 
+                handle = self.t_ses.get_torrents()[0]
             status = handle.status()
             
             print(f"\t[Seeder]: Progress: {status.progress*100:.1f}% | Peers: {status.num_peers} | Down: {status.download_rate/1000:.1f} KB/s")
-            for a in self.t_ses.pop_alerts():
-                if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
-                       lt.peer_error_alert, lt.listen_failed_alert,
-                       lt.listen_succeeded_alert, lt.incoming_connection_alert)):
-                    print(f"[Seeder] alert: {a}")
+            with self.t_lock:
+                for a in self.t_ses.pop_alerts():
+                    if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
+                        lt.peer_error_alert, lt.listen_failed_alert,
+                        lt.listen_succeeded_alert, lt.incoming_connection_alert)):
+                        print(f"[Seeder] alert: {a}")
 
     def create_snapshot(self):
         """
