@@ -132,7 +132,7 @@ class MutableSeeder:
                     print(f"  Is Valid: {handle.is_valid()}")
                     print(f"  State:    {s.state}")        # Looking for 'seeding' vs 'checking_files' vs 'error'
                     print(f"  Paused:   {s.paused}")       # Must be False
-                    print(f"  Error:    {s.errc}")         # Should be 0 / None
+                    print(f"  Error:    {s.errc.message()}")         # Should be 0 / None
                     print(f"  Has Metadata: {handle.has_metadata()}")
             
                 print(f"[Seeder]: Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
