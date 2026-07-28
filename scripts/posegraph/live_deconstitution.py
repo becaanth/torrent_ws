@@ -188,8 +188,8 @@ class Deconstitutor:
 
         if self._index_df is not None and not self._index_df.empty:
             self._write_new_chunks(self.robot_id)
-        else:
-            print("[Deconstitutor]: Delaying chunk writing, waiting for valid index structure.")
+        # else:
+        #     print("[Deconstitutor]: Delaying chunk writing, waiting for valid index structure.")
 
     def _ingest_new_rows(self, key: str, parse_fn):
         """
