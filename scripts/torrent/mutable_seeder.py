@@ -104,7 +104,11 @@ class MutableSeeder:
             ti = self.create_snapshot()
             infohash = ti.info_hash()
             with self.t_lock:
-                new_handle = self.t_ses.add_torrent({"ti" : ti, "save_path" : os.path.dirname(self.input_path)})
+                new_handle = self.t_ses.add_torrent({
+                    "ti" : ti, 
+                    "save_path" : os.path.dirname(self.input_path), 
+                    "flags": lt.torrent_flags.seed_mode
+                })
             if self.current_handle is not None:
                  self.current_handle.pause()
                  with self.t_lock:
