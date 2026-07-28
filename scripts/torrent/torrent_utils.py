@@ -117,6 +117,7 @@ def inspect_torrent(encoded_info):
                 ))
             pieces.append(Piece(top_vertices=vertices, top_edges=edges, metadata_written=False, data_ingested=False))
 
+    print(f"is pieces None? {pieces==None}, idx None? {idx['idx']==None}")
     return pieces, idx['idx']
 
 def on_mutable_item(sample):
@@ -139,37 +140,31 @@ def unpack_device(params: dict, robot_id):
     Load IPs and build explicit Zenoh listen/connect configuration.
     """
     d = params['device']
+    cfg = zenoh.Config()
+    cfg.insert_json5("mode", "peer")
+    cfg.insert_json5("scouting/gossip/enabled", "true")
+    cfg.insert_json5("connect/exit_on_failure", "false")
+    cfg.insert_json5("connect/timeout_ms", "-1")
+
 
     if d == 'docker':
         my_ip = DOCKER_IPS[f"torrent{robot_id}"]
-        router_ip = params.get('router', '127.0.0.1')
-        cfg = zenoh.Config()
-        cfg.insert_json5("connect/endpoints", json.dumps([f"tcp/{router_ip}:7447"]))
-
-    elif d == 'hunter':
+        cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{Z_PORT}"]))
         laptop_ip = ROBOT_IPS['base']
-        is_laptop = (params.get('container') == 'base')
-        cfg = zenoh.Config()
-
-        if is_laptop:
-            # LAPTOP SIDE: Listen on port {Z_PORT}
-            print(f"[unpack] Configured as LAPTOP LISTENER on tcp/0.0.0.0:{Z_PORT}")
-            my_ip = laptop_ip
-            cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{Z_PORT}"]))
-            cfg.insert_json5("mode", '"peer"')
-        else:
-            # ROBOT SIDE: Connect out to Laptop IP on port {Z_PORT}
-            my_ip = ROBOT_IPS[params['container']]
-            print(f"[unpack] Configured ROBOT CONNECTOR -> tcp/0.0.0.0:{Z_PORT}")
-            cfg.insert_json5("connect/endpoints", json.dumps([f"tcp/0.0.0.0:{Z_PORT}"]))
-            cfg.insert_json5("mode", '"peer"')
-            # Do not exit/crash if the endpoint isn't immediately reachable
-            cfg.insert_json5("connect/exit_on_failure", "false")
-            # Set timeout to -1 so it retries connection indefinitely in background
-            cfg.insert_json5("connect/timeout_ms", "-1")
-
+        cfg.insert_json5("connect/endpoints", json.dumps([f"tcp/{laptop_ip}:{Z_PORT}"]))
+    
+    elif d == 'hunter':
+        container = params.get('container', 'base')
+        my_ip = ROBOT_IPS[container]
+        cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{Z_PORT}"]))
+        peer_targets = [
+            f"tc[/{ip}:{Z_PORT}]"
+            for name, ip in ROBOT_IPS.items()
+            if ip != my_ip
+        ]
+        cfg.insert_json5("connect/endpoints", json.dumps(peer_targets))
     else:
         raise ValueError(f"[unpack_device] Invalid device parameter: {d}")
 
-    print(f"[unpack] my_ip: {my_ip}")
+    print(f"[unpack] Role: PEER | My IP: {my_ip} | Listening: tcp/0.0.0.0:{Z_PORT}")
     return my_ip, cfg
