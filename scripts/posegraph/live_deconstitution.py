@@ -168,7 +168,6 @@ class Deconstitutor:
 
     def _poll(self):
         """Read new rows from all sources, then write any new chunks."""
-        print(f"[Deconstitutor]: polling")
         conn = self._get_conn('index')
         if conn is not None:
             try:
