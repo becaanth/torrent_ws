@@ -47,6 +47,7 @@ class Orchestrator:
         self.z_ses = zenoh.open(z_cfg)
 
         # libtorrent session for this device
+        self.t_lock = threading.Lock()
         self.t_ses = lt.session({
             "listen_interfaces": f"0.0.0.0:{LT_PORT},[::]:{LT_PORT}",
             "enable_dht": False,
@@ -74,6 +75,7 @@ class Orchestrator:
             state=state,
             z_ses=self.z_ses,
             t_ses=self.t_ses,
+            t_lock=self.t_lock,
             my_ip=self.my_ip
         )
         self.fleet = {}
@@ -88,6 +90,7 @@ class Orchestrator:
             robot_id=robot_id,
             z_ses=self.z_ses,
             t_ses=self.t_ses,
+            t_lock=self.t_lock,
             my_ip=self.my_ip,
             on_torrent_discovered=self.handle_torrent_discovered,
             on_metadata_received=self.handle_metadata_received,
@@ -105,20 +108,21 @@ class Orchestrator:
     def handle_torrent_discovered(self, robot_id, mutable_item):
         # new torrent discovered; spawn a new seeder (cb from mutable_peer)
         print(f"[Orchestrator]: handle_torrent_discovered, id {robot_id}")
-        mutable_seeder = MutableSeeder(
-            params=seeder_params,
-            posegraph=self.posegraph,
-            this_robot_id=self.robot_id,
-            robot_id=robot_id,
-            mutable_item=mutable_item,
-            state=state,
-            z_ses=self.z_ses,
-            t_ses=self.t_ses,
-            my_ip=self.my_ip
-        )
-        self.fleet[robot_id] = mutable_seeder
-        new_thread = threading.Thread(target=self.fleet[robot_id].run, daemon=True)
-        new_thread.start()
+        # mutable_seeder = MutableSeeder( # TODO: ANTHONY UNCOMMENT THIS
+        #     params=seeder_params,
+        #     posegraph=self.posegraph,
+        #     this_robot_id=self.robot_id,
+        #     robot_id=robot_id,
+        #     mutable_item=mutable_item,
+        #     state=state,
+        #     z_ses=self.z_ses,
+        #     t_ses=self.t_ses,
+        #     t_lock=self.t_lock,
+        #     my_ip=self.my_ip
+        # )
+        # self.fleet[robot_id] = mutable_seeder
+        # new_thread = threading.Thread(target=self.fleet[robot_id].run, daemon=True)
+        # new_thread.start()
 
     def handle_metadata_received(self, robot_id, topology):
         # topology update, pass to reconstitutor (cb from mutable_peer)
