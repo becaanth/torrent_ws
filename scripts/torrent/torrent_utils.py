@@ -141,7 +141,7 @@ def unpack_device(params: dict, robot_id):
     """
     d = params['device']
     cfg = zenoh.Config()
-    cfg.insert_json5("mode", "peer")
+    cfg.insert_json5("mode", '"peer"')
     cfg.insert_json5("scouting/gossip/enabled", "true")
     cfg.insert_json5("connect/exit_on_failure", "false")
     cfg.insert_json5("connect/timeout_ms", "-1")
@@ -158,7 +158,7 @@ def unpack_device(params: dict, robot_id):
         my_ip = ROBOT_IPS[container]
         cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{Z_PORT}"]))
         peer_targets = [
-            f"tc[/{ip}:{Z_PORT}]"
+            f"tcp/{ip}:{Z_PORT}"
             for name, ip in ROBOT_IPS.items()
             if ip != my_ip
         ]
