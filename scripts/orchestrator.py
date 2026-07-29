@@ -3,6 +3,7 @@ from posegraph.live_reconstitution import Reconstitutor
 from torrent.mutable_seeder import MutableSeeder
 from torrent.mutable_peer import MutablePeer
 from torrent.torrent_utils import unpack_device
+from utils import *
 
 import zenoh
 import libtorrent as lt
@@ -11,7 +12,6 @@ import json
 import os
 
 import threading
-import logging
 
 LT_PORT = 5204
 
@@ -39,7 +39,7 @@ class Orchestrator:
         self.robot_id = robot_id
         self.posegraph = posegraph
 
-        print(f"[Orchestrator]: init with id {robot_id}, posegraph {posegraph}")
+        logging.info(f"init with id {robot_id}, posegraph {posegraph}")
 
         # zenoh session for this device
         self.my_ip, z_cfg = unpack_device(seeder_params, self.robot_id)
@@ -107,7 +107,7 @@ class Orchestrator:
 
     def handle_torrent_discovered(self, robot_id, mutable_item):
         # new torrent discovered; spawn a new seeder (cb from mutable_peer)
-        print(f"[Orchestrator]: handle_torrent_discovered, id {robot_id}")
+        logging.info(f"handle_torrent_discovered, id {robot_id}")
         # mutable_seeder = MutableSeeder( # TODO: ANTHONY UNCOMMENT THIS
         #     params=seeder_params,
         #     posegraph=self.posegraph,
@@ -126,12 +126,12 @@ class Orchestrator:
 
     def handle_metadata_received(self, robot_id, topology):
         # topology update, pass to reconstitutor (cb from mutable_peer)
-        print(f"[Orchestrator]: handle_metadata_received for id {robot_id}")
+        logging.info(f"handle_metadata_received for id {robot_id}")
         self.topology[robot_id] = topology
         self.rec.update_topology(robot_id, topology)
 
     def handle_torrent_update(self, robot_id, mutable_item):
-        print(f"[Orchestrator]: handle_torrent_update for id {robot_id}")
+        logging.info(f"handle_torrent_update for id {robot_id}")
         # self.fleet[robot_id].update_mutable_item(mutable_item) # TODO: ANTHONY UNCOMMENT THIS
 
     def run(self):
@@ -157,6 +157,8 @@ if __name__ == "__main__":
     parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
     args = parser.parse_args()
     robot_id = os.getenv("ROBOT_ID")
+    posegraph = args.posegraph
+    setup_logging(robot_id=robot_id, posegraph=posegraph, log_dir="logs")
 
     with open(f'torrent/{args.seeder_params}', "r") as f:
                 seeder_params = json.load(f)
@@ -170,7 +172,7 @@ if __name__ == "__main__":
         peer_params=peer_params,
         state=state,
         robot_id=robot_id,
-        posegraph=args.posegraph
+        posegraph=posegraph
     )
 
     orchestrator.run()

@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import time
 import argparse
+import logging
 
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
@@ -17,6 +18,8 @@ from vtr_common_msgs.msg import LieGroupTransform
 import contextlib
 import pdb
 import traceback
+
+logger = logging.getLogger(__name__)
 
 class Reconstitutor:
     """
@@ -74,7 +77,7 @@ class Reconstitutor:
         }
 
         # make directories for VTR
-        print(f'[Reconstitutor]: self.output_dir: {self.output_dir}')
+        logging.info(f'self.output_dir: {self.output_dir}')
         for key, _ in self.topics.items():
             if key == 'index': 
                 os.makedirs(f'{self.output_dir}/index', exist_ok=True)
@@ -100,18 +103,18 @@ class Reconstitutor:
 
     # ============= PUBLIC =================
     def run(self):
-        print(f"[Reconstitutor]: polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
+        logging.info(f"polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
         try:
             while True:
                 self._poll()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
-            print("\n[Reconstitutor]: stopped.")
+            logging.info("\nstopped.")
         finally:
             self._close()
 
     def update_topology(self, robot_id, topology):
-        print(f"[Reconstitutor]: updating topology for robot {robot_id}")
+        logging.info(f"updating topology for robot {robot_id}")
         self.topology[str(robot_id)] = topology
 
     # ============= PRIVATE ================
@@ -151,7 +154,7 @@ class Reconstitutor:
                     else: # tracked piece
                         tracked_piece = self.pieces[vid]
                         if len(piece.top_edges) > len(tracked_piece.top_edges):
-                            print(f"[Reconstitutor]: Merging {len(piece.top_edges) - len(tracked_piece.top_edges)} cross-session edges into submap {hex(vid)}")
+                            logging.debug(f"Merging {len(piece.top_edges) - len(tracked_piece.top_edges)} cross-session edges into submap {hex(vid)}")
                             tracked_piece.top_edges = piece.top_edges
                             tracked_piece.metadata_written = False
       
@@ -201,24 +204,24 @@ class Reconstitutor:
 
                     poll_data = self._parse_piece(folder_name, db_file)
                     if not poll_data or poll_data['pointmap'].empty:
-                        # print(f"[Reconstitutor]: DEBUG poll data empty")
+                        # logging.debug(f"DEBUG poll data empty")
                         continue
 
                     # if this robot's pieces
                     if folder_name == self.robot_id:
                         # self._ingest_local_piece(poll_data)
-                        # print(f"[Reconstitutor]: ingest local piece {db_file}")
-                        print(f"[Reconstitutor]: local piece, skip {db_file}")
+                        # logging.debug(f"ingest local piece {db_file}")
+                        logging.debug(f"local piece, skip {db_file}")
 
                     else:
                         if not self.pieces:
                             continue # wait for metadata
                         self._ingest_remote_piece(poll_data, target_piece)
-                        print(f"[Reconstitutor]: ingest remote piece {db_file}")
+                        logging.debug(f"ingest remote piece {db_file}")
 
                     self.db_written.append(db_file)
                 except Exception as e:
-                    print(f"[Reconstitutor]: WARNING {db_file} because {e}")
+                    logging.debug(f"WARNING {db_file} because {e}")
                     traceback.print_exc()
                     continue
 
@@ -236,7 +239,7 @@ class Reconstitutor:
                 df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
                 poll_data[table] = df
             except Exception as e:
-                # print(f"[Reconstitutor]: _parse_piece id | {db_file} | {e}")
+                # logging.debug(f"_parse_piece id | {db_file} | {e}")
                 poll_data[table] = pd.DataFrame() 
 
         conn.close()
@@ -280,7 +283,7 @@ class Reconstitutor:
                     for _, row in df.iterrows()
                 ])
                 conn.execute("COMMIT;")
-        print(f"[Reconstitutor]: Direct Local Ingestion Complete: {time.time() - s:.4f}s")
+        logging.info(f"Direct Local Ingestion Complete: {time.time() - s:.4f}s")
 
     def _ingest_remote_piece(self, poll_data: pd.DataFrame, piece: Piece):
         # take poll_data, fill relevant Piece
@@ -294,7 +297,7 @@ class Reconstitutor:
             piece.env_info = poll_data['env_info']
             self._write_message(piece)
             piece.data_ingested = True
-            print(f"[Reconstitutor]: ingest found match for submap {piece.top_vertices[0].vertex_id}")
+            logging.info(f"ingest found match for submap {piece.top_vertices[0].vertex_id}")
     
     # ============ .db3 INTERFACE ==============
     def _init_database(self):
@@ -312,7 +315,7 @@ class Reconstitutor:
 
             # reconnect to fresh file
             with self._open(k) as conn:
-                print(f'[Reconstitutor]: init db {k} at {self._conns[k]}, topic {self.topics[k]}')
+                logging.info(f'init db {k} at {self._conns[k]}, topic {self.topics[k]}')
                 existing = {
                     row[0] for row in conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('topics','messages')"
@@ -325,7 +328,7 @@ class Reconstitutor:
                     ).fetchone()
                     if row is not None:
                         self._last_rowid[k] = row[0]  # reuse existing topic_id
-                        print(f"[Reconstitutor]: attached to existing {k} (topic_id={row[0]})")
+                        logging.debug(f"attached to existing {k} (topic_id={row[0]})")
                         continue
                 else:
                     conn.execute("""
@@ -394,7 +397,7 @@ class Reconstitutor:
 
         piece.skeleton_rowids = rowids
         piece.metadata_written = True
-        print(f"[Reconstitutor]: _write_metadata: {time.time() - s}")
+        logging.info(f"_write_metadata: {time.time() - s}")
 
 
     def _write_message(self, piece: Piece):
@@ -414,7 +417,7 @@ class Reconstitutor:
             field = field_map.get(k, k)  # use mapped name if exists, else k itself
             df = getattr(piece, field)
             if df is None or df.empty:
-                print(f"[Reconstitutor]: skipping '{k}': no data")
+                logging.debug(f"skipping '{k}': no data")
                 continue
             
             with self._open(k) as conn:
@@ -449,7 +452,7 @@ class Reconstitutor:
                     ])
                 
                 conn.execute("COMMIT;")
-                print(f"[Reconstitutor]: _write_message: {hex(piece.top_vertices[0].vertex_id)}")
+                logging.info(f"_write_message: {hex(piece.top_vertices[0].vertex_id)}")
 
     def _write_index(self, index_msg):
         # write index.db3, containing MapInfo message
@@ -479,7 +482,7 @@ class Reconstitutor:
     # ============= CLEANUP ================
     def _close(self):
         # nothing to flush, each write closes its own connections
-        print("[Reconstitutor]: connections closed.")
+        logging.info("connections closed.")
 
 # +++++++++++++ HELPERS ++++++++++++++++
 def preview_piece(piece):
@@ -511,7 +514,7 @@ if __name__ == "__main__":
     output_dir = os.path.join(args.posegraph_root, f"r{posegraph}", 'graph')
     piece_path = os.path.join(args.piece_root, args.posegraph)
 
-    print(f'[Reconstitutor]: output_dir: {output_dir}')
+    logging.info(f'output_dir: {output_dir}')
     rec = Reconstitutor(
         pieces_path=piece_path,
         robot_id=robot_id,

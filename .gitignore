@@ -1,10 +1,5 @@
-reconstructed/*
-deconstructed/*
-build/*
-log/*
-install/*
-libtorrent/*
 scripts/torrent/*.json
+logs
 *.torrent
 *.pyc
 scripts/posegraph/__pycache__

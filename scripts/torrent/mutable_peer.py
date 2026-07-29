@@ -8,10 +8,12 @@ import os
 import argparse
 
 from .torrent_utils import *
+import logging
 
 import pdb
 
 PORT = 5204
+logger = logging.getLogger(__name__)
 
 class MutablePeer:
     """
@@ -27,7 +29,7 @@ class MutablePeer:
         self.my_ip = my_ip
         self.z_ses = z_ses
 
-        print("[Peer]: unpacked config")
+        logging.info("unpacked config")
         self.router = params['router']
         self.robot_id = robot_id
 
@@ -37,16 +39,16 @@ class MutablePeer:
 
         # file system
         self.output_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}_{self.robot_id}"
-        print(f"[Peer]: outputh path: {self.output_path}")
+        logging.info(f"outputh path: {self.output_path}")
         os.makedirs(self.output_path, exist_ok=True)
 
         # libtorrent
-        print("[Peer]: init lt")
+        logging.info("init lt")
         self.t_ses = t_ses
         self.t_lock = t_lock
 
         # zenoh
-        print("[Peer]: init zenoh")
+        logging.info("init zenoh")
 
         self.message_queue = Queue()
         self.sub = self.z_ses.declare_subscriber("mutable_items/**", self.on_sample)
@@ -69,15 +71,15 @@ class MutablePeer:
         """
         run the main loop
         """
-        print(f"[Peer]: running the main loop (Ctrl-C to stop)")
+        logging.info(f"running the main loop (Ctrl-C to stop)")
         try:
             while True:
-                print(f"[Peer]: len queue = {self.message_queue.qsize()}, peers {self.peers}")
+                logging.debug(f"len queue = {self.message_queue.qsize()}, peers {self.peers}")
                 self._flush_queue()
                 self._poll_metadata()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
-            print("\n[Peer]: stopped")
+            logging.info("\nstopped")
         finally:
             self.z_ses.close()
 
@@ -89,23 +91,23 @@ class MutablePeer:
         while not self.message_queue.empty():
             sample = self.message_queue.get()
             mutable_item = on_mutable_item(sample)
-            print(f"[Peer]: mutable item received \n {mutable_to_string(mutable_item)}")
+            logging.info(f"mutable item received \n {mutable_to_string(mutable_item)}")
 
             # check if heard own seeder
             if mutable_item['my_ip'] == self.my_ip:
-                print(f"[Peer]: WARNING flush skipping. don't leech own pieces")
+                logging.debug(f"WARNING flush skipping. don't leech own pieces")
                 continue
 
             peer_endpoint = (mutable_item['my_ip'], PORT)
             if peer_endpoint not in self.peers:
                 self.peers.append(peer_endpoint)
-                print(f"[Peer]: added {peer_endpoint} to fleet peer list ({len(self.peers)} known)")
+                logging.debug(f"added {peer_endpoint} to fleet peer list ({len(self.peers)} known)")
             
             # check if new session discovered
             existing_ids = {mi['robot_id'] for _, mi in self.mutable_items.items() if 'robot_id' in mi}
             robot_id = mutable_item['robot_id']
             if robot_id not in existing_ids:
-                print(f"[Peer]: new \n{mutable_to_string(mutable_item)}")
+                logging.info(f"new \n{mutable_to_string(mutable_item)}")
                 self.mutable_items[robot_id] = mutable_item
                 with self.t_lock:
                     handle = self.t_ses.add_torrent({
@@ -127,7 +129,7 @@ class MutablePeer:
                 saved_mi = self.mutable_items[robot_id]
                 if mutable_item['seq'] > saved_mi['seq']: # what if we torrent a completed map? then these are equal
                     # overwrite mutable item
-                    print(f"[Peer]: overwrite \n\t {mutable_to_string(mutable_item)}")
+                    logging.debug(f"overwrite \n\t {mutable_to_string(mutable_item)}")
                     self.mutable_items[robot_id] = mutable_item
 
                     # enforce robots authority on local sessions
@@ -145,7 +147,7 @@ class MutablePeer:
                             # infohash has not changes
                             continue
 
-                        print(f"[Peer]: infohash updated for robot_id {robot_id}, replacing handle")
+                        logging.debug(f"infohash updated for robot_id {robot_id}, replacing handle")
                         self.processed_metadata_hashes.discard(old_hash)
                         old_handle.pause()
                         with self.t_lock:
@@ -160,27 +162,27 @@ class MutablePeer:
                     self.torrent_handles[robot_id] = new_handle
 
                     for ip, p in self.peers:
-                        print(f"[Peer]: attempting connect_peer to {(ip, p)}")
+                        logging.debug(f"attempting connect_peer to {(ip, p)}")
                         new_handle.connect_peer((ip, p))
 
         # Monitor existing torrents
         with self.t_lock:
             for handle in self.t_ses.get_torrents():
                 if not handle.is_valid():
-                    print(f"[Peer]: handle is invalid")
+                    logging.debug(f"handle is invalid")
                     continue
 
                 s = handle.status()
                 if s.paused or s.state == lt.torrent_status.states.queued_for_checking:
-                    print(f"[Peer]: handle is paused")
+                    logging.debug(f"handle is paused")
                     continue
 
-                print(f"[Peer]: progress {s.progress*100:.1f}%, handle {handle.info_hash()}")
+                logging.debug(f"progress {s.progress*100:.1f}%, handle {handle.info_hash()}")
                 for a in self.t_ses.pop_alerts():
                     if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
                                     lt.peer_error_alert, lt.metadata_failed_alert,
                                     lt.metadata_received_alert)):
-                        print(f"[Peer] alert: {a}")
+                        logging.debug(f"[Peer] alert: {a}")
 
     def _poll_metadata(self):
         """
@@ -218,18 +220,18 @@ class MutablePeer:
 
                 # orchestrator callback
                 if metadata and self.on_metadata_received:
-                    print(f"[Peer] poll_metadata updated for robot {robot_id}")
+                    logging.info(f"[Peer] poll_metadata updated for robot {robot_id}")
                     self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
                     self.processed_metadata_hashes.add(infohash_bytes)               
 
     def on_sample(self, sample):
-        print("[Peer]: Received Zenoh message")
+        logging.info("Received Zenoh message")
         
         if sample != self.last_sample:
             self.message_queue.put(sample)
             self.last_sample = sample
         else:
-            print(f"[Peer]: Duplicate sample received")
+            logging.debug(f"Duplicate sample received")
 
 # ======================================================
 

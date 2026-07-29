@@ -23,6 +23,7 @@ import argparse
 import os
 import sqlite3
 import time
+import logging
 
 import numpy as np
 import pandas as pd
@@ -32,7 +33,7 @@ from rosidl_runtime_py.utilities import get_message
 from .posegraph_utils import *
 
 PIECE_SIZE = 2 * 1024 * 1024  # 2 MiB
-
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -134,7 +135,7 @@ class Deconstitutor:
         # index df read lazily on first successful connection
         self._index_df: pd.DataFrame | None = None
 
-        print(f"[Deconstitutor]: initialized with IP {self.input_dir} OP: {self.output_dir}")
+        logging.info(f"initialized with IP {self.input_dir} OP: {self.output_dir}")
 
     # ------------------------------------------------------------------
     # Public
@@ -148,17 +149,17 @@ class Deconstitutor:
         if not os.path.exists(full_path):
             return None
         self._conns[key] = sqlite3.connect(full_path, check_same_thread=False)
-        print(f"[Deconstitutor]: opened {key}")
+        logging.info(f"opened {key}")
         return self._conns[key]
 
     def run(self):
-        print(f"[Deconstitutor]: polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
+        logging.info(f"polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
         try:
             while True:
                 self._poll()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
-            print("\n[Deconstitutor]: stopped.")
+            logging.info("\nstopped.")
         finally:
             self._close()
 
@@ -174,9 +175,9 @@ class Deconstitutor:
                 self._index_df = _read_full_df(conn)
                 self._last_rowid['index'] = int(self._index_df['rowid'].max()) if len(self._index_df) else 0
             except Exception as e:
-                print(f"[Deconstitutor]: index: not ready yet ({e})")
+                logging.warning(f"index: not ready yet ({e})")
         else:
-            print(f"[Deconstitutor]: conn is None")
+            logging.warning(f"conn is None")
 
         self._ingest_new_rows('vertices',      self._parse_vertices)
         self._ingest_new_rows('edges',         self._parse_edges)
@@ -188,7 +189,7 @@ class Deconstitutor:
         if self._index_df is not None and not self._index_df.empty:
             self._write_new_chunks(self.robot_id)
         # else:
-        #     print("[Deconstitutor]: Delaying chunk writing, waiting for valid index structure.")
+        #     logging.warning("Delaying chunk writing, waiting for valid index structure.")
 
     def _ingest_new_rows(self, key: str, parse_fn):
         """
@@ -196,14 +197,14 @@ class Deconstitutor:
         and call parse_fn to update decoded id arrays.
         Silently skips if the file does not exist yet or the schema isn't ready.
         """
-        # print(f"[Deconstitutor]: ingesting {key}")
+        # logging.info(f"ingesting {key}")
         conn = self._get_conn(key)
         if conn is None:
             return
         try:
             new_rows = _read_new_rows(conn, self._last_rowid[key])
         except Exception as e:
-            print(f"[Deconstitutor]: {key}: reconnecting ({e})")
+            logging.warning(f"{key}: reconnecting ({e})")
             try:
                 self._conns[key].close()
             except Exception:
@@ -260,7 +261,7 @@ class Deconstitutor:
         For each submap not yet written, check if we have enough data
         to write its chunk and write it if so.
         """
-        # print(f"[Deconstitutor]: writing new chunks")
+        # logging.info(f"writing new chunks")
 
         for i, sid in enumerate(self._submap_ids):
             if i in self._written_chunks:
@@ -274,7 +275,7 @@ class Deconstitutor:
 
             # only write chunks originated by this robot; other pieces will have come from torrent
             originator_id = extract_robot_id(sid)
-            print(f"[Deconstitutor]: this robot {self.robot_id}, originator {originator_id}")
+            logging.info(f"this robot {self.robot_id}, originator {originator_id}")
             if (originator_id != robot_id):
                 self._written_chunks.add(i)
                 continue
@@ -298,7 +299,7 @@ class Deconstitutor:
             # waypoint_name and env_info rows at same indices
             max_idx = int(max(ptr_row_idxs))
             if len(self._df['waypoint_name']) <= max_idx or len(self._df['env_info']) <= max_idx:
-                print(f"  [chunk {i}] SKIP: waypoint_name or env_info not yet arrived")
+                logging.debug(f"  [chunk {i}] SKIP: waypoint_name or env_info not yet arrived")
                 continue
             chunk_waypoints = self._df['waypoint_name'].iloc[ptr_row_idxs]
             chunk_env_info  = self._df['env_info'].iloc[ptr_row_idxs]
@@ -307,7 +308,7 @@ class Deconstitutor:
             v_mask    = np.isin(self._vertex_ids, relevant_vids)
             valid_vtx = np.where(v_mask)[0]
             if len(valid_vtx) == 0:
-                print(f"  [chunk {i}] SKIP: no matching vertices")
+                logging.debug(f"  [chunk {i}] SKIP: no matching vertices")
                 continue
             sort_vidx  = np.argsort(self._vertex_ids[v_mask])
             chunk_vtxs = self._df['vertices'].iloc[valid_vtx[sort_vidx]]
@@ -339,7 +340,7 @@ class Deconstitutor:
 
             pad_file_to_exact_size(db_path, PIECE_SIZE)
             self._written_chunks.add(i)
-            print(f"[Deconstitutor]: finalized chunk {str(hex(int(sid)))[2:].zfill(16)}.db3")
+            logging.debug(f"finalized chunk {str(hex(int(sid)))[2:].zfill(16)}.db3")
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -349,7 +350,7 @@ class Deconstitutor:
         for conn in self._conns.values():
             if conn is not None:
                 conn.close()
-        print("[Deconstitutor]: connections closed.")
+        logging.info("connections closed.")
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +368,7 @@ if __name__ == "__main__":
     robot_id = os.getenv("ROBOT_ID")
     input_dir   = os.path.join(args.posegraph_root, args.posegraph, 'graph')
     output_dir = os.path.join(args.piece_root, args.posegraph, robot_id)
-    print(f"ROBOT_ID : {robot_id}")
+    logging.info(f"ROBOT_ID : {robot_id}")
 
     dec = Deconstitutor(
         input_dir=input_dir,

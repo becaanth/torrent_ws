@@ -7,6 +7,7 @@ import os
 import json
 import msgpack
 import argparse
+import logging
 
 from posegraph.posegraph_utils import *
 from .torrent_utils import *
@@ -16,6 +17,7 @@ import pdb
 # zenohd --cfg 'scouting/multicast/enabled:false'
 
 PORT=5204
+logger = logging.getLogger(__name__)
 
 class MutableSeeder:
     """
@@ -29,7 +31,7 @@ class MutableSeeder:
         self.container = params['container']
         self.my_ip = my_ip
         self.z_ses = z_ses
-        print("[Seeder]: unpacked config")
+        logging.info("unpacked config")
         self.router = params['router']
 
         # data params
@@ -40,18 +42,18 @@ class MutableSeeder:
 
         # file system
         self.input_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}_{self.this_robot_id}/{self.robot_id}"
-        print(f"[Seeder]: input path {self.input_path}")
+        logging.info(f"input path {self.input_path}")
         self.bencoded_torrent_dict = {}
         os.makedirs(self.input_path, exist_ok=True)
     
         # libtorrent
-        print("[Seeder]: init lt")
+        logging.info("init lt")
         self.t_ses = t_ses
         self.t_lock = t_lock
         self.current_handle = None
 
         # zenoh
-        print("[Seeder]: init zenoh")
+        logging.info("init zenoh")
 
         # mutable update
         sk = SigningKey(bytes.fromhex(self.state["sk"]))
@@ -75,21 +77,21 @@ class MutableSeeder:
 
         # inversion of control callback
         self.on_torrent_updated = on_torrent_updated # -> update mutable item from remote
-        print("[Seeder]: init done")
+        logging.info("init done")
 
 
     def run(self):
         """
         run the main loop
         """
-        print(f"[Seeder]: polling at {self.poll_hz} Hz (Ctrl-C to stop)")
+        logging.info(f"polling at {self.poll_hz} Hz (Ctrl-C to stop)")
         try: 
             while True:
-                print(f"[Seeder]: polling peers")
+                logging.info(f"polling peers")
                 self._poll()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
-            print("\n[Seeder]: stopped.")
+            logging.info("\nstopped.")
         finally:
             self.z_ses.close()
 
@@ -116,42 +118,42 @@ class MutableSeeder:
                     self.t_ses.remove_torrent(self.current_handle)
             self.current_handle = new_handle
             
-            print(f"[Seeder]: snapshot created with hash {ti}")
+            logging.info(f"snapshot created with hash {ti}")
 
             # update mutable item if authority
             if self.this_robot_id == self.robot_id:
                 self.mi['infohash'] = infohash.to_bytes()
                 self.mi['seq']+=1
-                print(f"[Seeder]: seeding mutable item: \n{mutable_to_string(self.mi)}")
+                logging.info(f"seeding mutable item: \n{mutable_to_string(self.mi)}")
                 
         if self.start_flag:
             # pub gossip over Zenoh
             payload = msgpack.packb(self.mi, use_bin_type=True)
-            print(f"[Seeder]: putting zenoh item for {self.robot_id}")
+            logging.debug(f"putting zenoh item for {self.robot_id}")
             self.z_ses.put(f"mutable_items/{self.robot_id}", payload)     
             with self.t_lock: 
                 for handle in self.t_ses.get_torrents():
                     s = handle.status()
-                    print(f"[Robot Seeder Check]:")
-                    print(f"  Infohash: {handle.info_hash()}")
-                    print(f"  Is Valid: {handle.is_valid()}")
-                    print(f"  State:    {s.state}")        # Looking for 'seeding' vs 'checking_files' vs 'error'
-                    print(f"  Paused:   {s.paused}")       # Must be False
-                    print(f"  Error:    {s.errc.message()}")         # Should be 0 / None
-                    print(f"  Has Metadata: {handle.has_metadata()}")
+                    logging.debug(f"[Robot Seeder Check]:")
+                    logging.debug(f"  Infohash: {handle.info_hash()}")
+                    logging.debug(f"  Is Valid: {handle.is_valid()}")
+                    logging.debug(f"  State:    {s.state}")        # Looking for 'seeding' vs 'checking_files' vs 'error'
+                    logging.debug(f"  Paused:   {s.paused}")       # Must be False
+                    logging.debug(f"  Error:    {s.errc.message()}")         # Should be 0 / None
+                    logging.debug(f"  Has Metadata: {handle.has_metadata()}")
             
-                print(f"[Seeder]: Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
+                logging.info(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
                 for a in self.t_ses.pop_alerts():
                     if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
                         lt.peer_error_alert, lt.listen_failed_alert,
                         lt.listen_succeeded_alert, lt.incoming_connection_alert)):
-                        print(f"[Seeder] alert: {a}")
+                        logging.info(f"[Seeder] alert: {a}")
 
     def create_snapshot(self):
         """
         Generate new .torrent for a directory
         """
-        print(f"[Seeder]: snapshot input path : {self.input_path}")
+        logging.info(f"snapshot input path : {self.input_path}")
         fs = lt.file_storage()
         lt.add_files(fs, self.input_path, sqlite_file_filter) # filter removes -journal, -wal extensions
 
@@ -172,7 +174,7 @@ class MutableSeeder:
             target_file_path = f"{self.input_path}/{filename}"
 
             if not os.path.exists(target_file_path) or os.path.getsize(target_file_path) == 0:
-                print(f"[Seeder]: snapshot WARNING: Skipping empty or missing file {filename}")
+                logging.warning(f"snapshot WARNING: Skipping empty or missing file {filename}")
                 continue
 
             if os.path.exists(target_file_path + "-journal") or os.path.exists(target_file_path + "-wal"):
@@ -194,7 +196,7 @@ class MutableSeeder:
                     [edge_to_dict(e) for e in edges], use_bin_type=True
                 )
             except Exception as e:
-                print(f"[Seeder]: snapshot ERROR parsing chunk {filename}: {e}. Skipping annotations for this file.")
+                logging.error(f"snapshot ERROR parsing chunk {filename}: {e}. Skipping annotations for this file.")
                 continue
             
         ti = lt.torrent_info(torrent_dict)
@@ -203,7 +205,7 @@ class MutableSeeder:
         return ti
     
     def update_mutable_item(self, mutable_item):
-        print(f"[Seeder]: updating mutable item for robot {self.robot_id}")
+        logging.debug(f"updating mutable item for robot {self.robot_id}")
         if self.mi['seq'] < mutable_item['seq']:
             self.mi = mutable_item
             self.mi['my_ip'] = self.my_ip
