@@ -5,14 +5,14 @@ import argparse
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = 'Script to deconstruct posegraphs submap-wise')
     parser.add_argument('-p', '--posegraph', default='none', help="The name of the posegraph") 
-    parser.add_argument('-a', '--this_robot', default='none', help="The name of the posegraph") 
-    parser.add_argument('-b', '--src_robot', default='none', help="The name of the posegraph") 
-    parser.add_argument('-d', '--db', default='none', help="The name of the posegraph") 
-    parser.add_argument('--piece_root', default='/home/asrl/ASRL/vtr3/temp/pcs')
+    parser.add_argument('-t', '--this_robot', default='none', help="The name of the posegraph") 
+    parser.add_argument('-s', '--src_robot', default='none', help="The name of the posegraph") 
+    parser.add_argument('-f', '--db', default='none', help="The name of the posegraph") 
+    parser.add_argument('-d', '--device', default='none', help="The name of the posegraph") 
     args = parser.parse_args()
 
-    piece_path = os.path.join(args.piece_root, args.posegraph)
-    db_path = f"{piece_path}_{args.this_robot}/{args.src_robot}/{args.db}"
+    piece_path = f"/home/{args.device}/ASRL/vtr3/temp/pcs"
+    db_path = f"{piece_path}/{args.posegraph}_{args.this_robot}/{args.src_robot}/{args.db}"
     tables = ['vtr_index','env_info','waypoint_name','vertices','edges','pointmap','pointmap_ptr']
     conn = sqlite3.connect(db_path, isolation_level=None)
     poll_data = {}
@@ -28,4 +28,3 @@ if __name__ == "__main__":
     conn.close()
 
     print(poll_data)
-    pdb.set_trace()
