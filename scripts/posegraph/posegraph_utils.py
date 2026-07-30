@@ -304,6 +304,9 @@ class Piece:
     vtr_index: Optional[pd.DataFrame] = None
     pointmap_ptr: Optional[pd.DataFrame] = None
 
+    def __repr__(self):
+        return f"First vid {self.top_vertices[0].vertex_id}, last vid {self.top_vertices[-1].vertex_id} \n \tvertices: {self.vertices is None} \n\tedges: {self.edges is None} \n\tpointmap: {self.pointmap is None} \n\tpointmap_ptr: {self.pointmap_ptr is None}"
+
 def parse_chunk(db_path: str) -> tuple[list[Vertex], list[Edge]]:
     """
     Parse a single deconstructed .db3 chunk.

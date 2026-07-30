@@ -218,7 +218,8 @@ class Reconstitutor:
                             continue # wait for metadata
                         self._ingest_remote_piece(poll_data, target_piece)
                         logging.debug(f"ingest remote piece {db_file}")
-
+                    
+                    logging.info(target_piece)
                     self.db_written.append(db_file)
                 except Exception as e:
                     logging.debug(f"WARNING {db_file} because {e}")
