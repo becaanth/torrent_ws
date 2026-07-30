@@ -31,3 +31,4 @@ if __name__ == "__main__":
     conn.close()
 
     print(poll_data)
+    pdb.set_trace()
