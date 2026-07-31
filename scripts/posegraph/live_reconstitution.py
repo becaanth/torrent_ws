@@ -203,8 +203,21 @@ class Reconstitutor:
                             continue
 
                     poll_data = self._parse_piece(folder_name, db_file)
-                    if not poll_data or poll_data['pointmap'].empty:
-                        # logging.debug(f"DEBUG poll data empty")
+                    # skip incomplete data
+                    if not poll_data:
+                        logging.error(f"poll data empty")
+                        continue
+                    if poll_data['vertices'].empty:
+                        logging.error(f"\t missing vertices")
+                        continue
+                    if poll_data['edges'].empty:
+                        logging.error(f"\t missing edges")
+                        continue
+                    if poll_data['pointmap'].empty:
+                        logging.error(f"\t missing pointmap")
+                        continue
+                    if poll_data['pointmap_ptr'].empty:
+                        logging.error(f"\t missing pointmap_ptr")
                         continue
 
                     # if this robot's pieces
@@ -288,17 +301,17 @@ class Reconstitutor:
 
     def _ingest_remote_piece(self, poll_data: pd.DataFrame, piece: Piece):
         # take poll_data, fill relevant Piece
-            piece.vertices = poll_data['vertices']
-            piece.edges = poll_data['edges']
-            piece.pointmap = poll_data['pointmap']
-            piece.pointmap_v0 = poll_data['pointmap']
-            piece.pointmap_ptr = poll_data['pointmap_ptr']
-            piece.waypoint_name = poll_data['waypoint_name']
-            piece.vtr_index = poll_data['vtr_index']
-            piece.env_info = poll_data['env_info']
-            self._write_message(piece)
-            piece.data_ingested = True
-            logging.info(f"ingest found match for submap {piece.top_vertices[0].vertex_id}")
+        piece.vertices = poll_data['vertices']
+        piece.edges = poll_data['edges']
+        piece.pointmap = poll_data['pointmap']
+        piece.pointmap_v0 = poll_data['pointmap']
+        piece.pointmap_ptr = poll_data['pointmap_ptr']
+        piece.waypoint_name = poll_data['waypoint_name']
+        piece.vtr_index = poll_data['vtr_index']
+        piece.env_info = poll_data['env_info']
+        self._write_message(piece)
+        piece.data_ingested = True
+        logging.info(f"ingest found match for submap {piece.top_vertices[0].vertex_id}")
     
     # ============ .db3 INTERFACE ==============
     def _init_database(self):
@@ -400,7 +413,6 @@ class Reconstitutor:
         piece.metadata_written = True
         logging.info(f"_write_metadata: {time.time() - s}")
 
-
     def _write_message(self, piece: Piece):
         """
         Connect to existing conns and write messages
@@ -430,7 +442,7 @@ class Reconstitutor:
                         conn.executemany("""
                             INSERT INTO messages (topic_id, timestamp, data)
                             VALUES (?, ?, ?)
-                        """, [
+                            """, [
                             (self._last_rowid[k], int(row['timestamp']), row['data'])
                             for _, row in df.iterrows()
                         ])
