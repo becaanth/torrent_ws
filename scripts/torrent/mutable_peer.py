@@ -168,6 +168,7 @@ class MutablePeer:
         # Monitor existing torrents
         with self.t_lock:
             for handle in self.t_ses.get_torrents():
+                logging.debug(f"progress {s.progress*100:.1f}%, handle {handle.info_hash()}")
                 if not handle.is_valid():
                     logging.debug(f"handle is invalid")
                     continue
@@ -177,7 +178,6 @@ class MutablePeer:
                     logging.debug(f"handle is paused")
                     continue
 
-                logging.debug(f"progress {s.progress*100:.1f}%, handle {handle.info_hash()}")
                 for a in self.t_ses.pop_alerts():
                     if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
                                     lt.peer_error_alert, lt.metadata_failed_alert,
