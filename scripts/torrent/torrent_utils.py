@@ -2,7 +2,6 @@ import time
 import os
 import json
 import msgpack
-import pprint
 import libtorrent as lt
 import zenoh
 from posegraph.posegraph_utils import *
@@ -19,7 +18,7 @@ ROBOT_IPS = {
 # Anthonys laptop
 DOCKER_IPS = {
     'torrent0':'172.18.0.2',
-    'torrent1':'172.18.0.3',
+    'torrent15':'172.18.0.3',
     'torrent2':'172.18.0.4',
     'torrent3':'172.18.0.4',
     'torrent4':'172.18.0.3',
@@ -148,11 +147,16 @@ def unpack_device(params: dict, robot_id):
 
 
     if d == 'docker':
-        my_ip = DOCKER_IPS[f"torrent{robot_id}"]
-        cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{Z_PORT}"]))
-        laptop_ip = ROBOT_IPS['base']
-        cfg.insert_json5("connect/endpoints", json.dumps([f"tcp/{laptop_ip}:{Z_PORT}"]))
-    
+            my_ip = DOCKER_IPS[f"torrent{robot_id}"]
+            cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{Z_PORT}"]))
+            
+            # Connect to host base AND all other torrent peer container IPs
+            peer_targets = [f"tcp/{ROBOT_IPS['base']}:{Z_PORT}"]
+            for name, ip in DOCKER_IPS.items():
+                if ip != my_ip:
+                    peer_targets.append(f"tcp/{ip}:{Z_PORT}")
+                    
+            cfg.insert_json5("connect/endpoints", json.dumps(peer_targets))
     elif d == 'hunter':
         container = params.get('container', 'base')
         my_ip = ROBOT_IPS[container]
