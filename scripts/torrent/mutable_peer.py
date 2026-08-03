@@ -194,6 +194,10 @@ class MutablePeer:
                 if not handle.has_metadata():
                     continue
 
+                priorities = handle.get_file_priorities()
+                logger.info(f"[Peer]: file priorities {len(priorities)}")
+                downloaded_mask = list(handle.status().pieces)
+                logger.info(f"[Peer]: downloaded mask {len(downloaded_mask), np.sum(downloaded_mask)}")
 
                 # get torrent info (metadata)
                 info = handle.get_torrent_info()
@@ -238,10 +242,12 @@ class MutablePeer:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Mutable Peer (LibTorrent + Zenoh)")
     parser.add_argument('-s', '--peer_params', type=str, default = 'peer_params.json')
+    parser.add_argument('-p', '--posegraph', required=True,help="Bag name (subdirectory under folder_path)")
     parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
     parser.add_argument('--poll_hz', type=float, default = 0.25)
     args = parser.parse_args()
     robot_id = os.getenv("ROBOT_ID")
+    posegraph=args.posegraph
 
     with open(f'torrent/{args.peer_params}', "r") as f:
                 params = json.load(f)
@@ -251,6 +257,7 @@ if __name__ == "__main__":
 
     mutable_peer = MutablePeer(
         params=params,
+        posegraph=posegraph,
         state=state,
         robot_id=robot_id,
         poll_hz=args.poll_hz

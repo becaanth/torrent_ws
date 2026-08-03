@@ -17,6 +17,7 @@ import pdb
 # zenohd --cfg 'scouting/multicast/enabled:false'
 
 PORT=5204
+PIECE_SIZE = 2 * 1024 * 1024  # 2 MiB
 logger = logging.getLogger(__name__)
 
 class MutableSeeder:
@@ -155,14 +156,12 @@ class MutableSeeder:
         """
         logging.info(f"snapshot input path : {self.input_path}")
         fs = lt.file_storage()
-        lt.add_files(fs, self.input_path, sqlite_file_filter) # filter removes -journal, -wal extensions
+        fs.set_piece_length(PIECE_SIZE)
+        lt.add_files(fs, self.input_path, sqlite_file_filter, flags=lt.create_torrent_flags_t.optimize_alignment) # filter removes -journal, -wal extensions
 
-        t = lt.create_torrent(fs)
-        
-        PIECE_SIZE = 2 * 1024 * 1024 # padding
-        t.piece_size(PIECE_SIZE)
-
+        t = lt.create_torrent(fs, PIECE_SIZE)        
         lt.set_piece_hashes(t, os.path.dirname(self.input_path))
+
         torrent_dict = t.generate()
         wrote_idx = False
         # annotate each entry in the dictionary
@@ -215,11 +214,13 @@ class MutableSeeder:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Mutable Seeder (LibTorrent + Zenoh)")
     parser.add_argument('-s', '--seeder_params', type=str, default = 'seeder_params.json')
+    parser.add_argument('-p', '--posegraph', required=True,help="Bag name (subdirectory under folder_path)")
     parser.add_argument('-r', '--robot_id', type=int, default = 0)
     parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
     parser.add_argument('--poll_hz', type=float, default = 0.25)
     args = parser.parse_args()
     this_robot_id = os.getenv("ROBOT_ID")
+    posegraph = args.posegraph
 
     with open(f'torrent/{args.seeder_params}', "r") as f:
                 params = json.load(f)
@@ -229,6 +230,7 @@ if __name__ == "__main__":
 
     mutable_seeder = MutableSeeder(
         params=params,
+        posegraph=posegraph,
         this_robot_id=this_robot_id,
         robot_id=args.robot_id,
         state=state,
