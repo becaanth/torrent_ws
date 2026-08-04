@@ -105,9 +105,6 @@ class MutablePeer:
                 file_idx = alert.index # The file/piece index that completed
                 logging.info(f"file {file_idx} completed on torrent: {handle.info_hash()}")
             
-                # Directly execute your policy update on that specific handle
-                self._on_file_completed(handle)
-            
             # connection/debug            
             elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
                 logging.debug(f"peer event: {alert}")
@@ -205,6 +202,18 @@ class MutablePeer:
         if infohash_bytes in self.processed_metadata_hashes:
             return
 
+        # piece priorities
+        with self.t_lock:
+            if not handle.is_valid():
+                return
+            
+            logging.info(f"applying {self.policy.__name__} policy  to handle {handle.info_hash()}")
+            priorities = handle.get_piece_priorities() # pieces same as files
+            downloaded_mask = list(handle.status().pieces)
+            new_priorities = self.policy(priorities, downloaded_mask, self.pol_param)
+            logging.info(f"new_priorities \t{new_priorities}")
+            handle.prioritize_files(new_priorities)
+
         # find associated robot_id
         robot_id = None
         for rid, mi in self.mutable_items.items():
@@ -226,23 +235,6 @@ class MutablePeer:
             logging.info(f"poll_metadata updated for robot {robot_id}")
             self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
             self.processed_metadata_hashes.add(infohash_bytes)               
-
-    def _on_file_completed(self, handle):
-        """
-        Triggered when a file is completed downloading
-        - reassign piece priorities for that handle according to the policy
-        """
-        # this handle is
-        with self.t_lock:
-            if not handle.is_valid():
-                return
-            
-            logging.info(f"applying {self.policy.__name__} policy  to handle {handle.info_hash()}")
-            priorities = handle.get_piece_priorities() # pieces same as files
-            downloaded_mask = list(handle.status().pieces)
-            new_priorities = self.policy(priorities, downloaded_mask, self.pol_param)
-            logging.info(f"new_priorities \t{new_priorities}")
-            handle.prioritize_files(new_priorities)
 
     def on_sample(self, sample):
         logging.info("Received Zenoh message")
