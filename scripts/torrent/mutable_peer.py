@@ -99,6 +99,7 @@ class MutablePeer:
                 handle = alert.handle  # Direct handle reference attached to the alert!
                 logging.info(f"metadata received for torrent: {handle.info_hash()}")
                 self._handle_metadata_completion(handle)
+                handle.unset_flags(lt.torrent_flags.upload_mode)  # now allow downloading
 
             # piece/file completed
             elif isinstance(alert, lt.file_completed_alert):
@@ -142,7 +143,8 @@ class MutablePeer:
                 with self.t_lock:
                     handle = self.t_ses.add_torrent({
                         'info_hash': mutable_item['infohash'],
-                        'save_path': self.output_path
+                        'save_path': self.output_path,
+                        'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
                     })
                 self.torrent_handles[robot_id] = handle
 
