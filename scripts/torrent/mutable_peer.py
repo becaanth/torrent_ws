@@ -8,6 +8,7 @@ import os
 import argparse
 
 from .torrent_utils import *
+from .piece_pickers import get_policy
 import logging
 
 import pdb
@@ -19,7 +20,7 @@ class MutablePeer:
     """
     Listen to Zenoh gossip, join a torrent session
     """
-    def __init__(self, params : dict, posegraph : str, state : dict, robot_id, z_ses, t_ses, t_lock, my_ip, poll_hz : float = 0.5,
+    def __init__(self, params : dict, posegraph : str, state : dict, robot_id, policy, pol_param, z_ses, t_ses, t_lock, my_ip, poll_hz : float = 0.5,
                  on_torrent_discovered=None, on_metadata_received=None, on_torrent_updated=None):
         
         # robot params
@@ -32,6 +33,8 @@ class MutablePeer:
         logging.info("unpacked config")
         self.router = params['router']
         self.robot_id = robot_id
+        self.policy = policy
+        self.pol_param = pol_param
 
         # data params
         self.posegraph = posegraph
@@ -75,13 +78,39 @@ class MutablePeer:
         try:
             while True:
                 logging.debug(f"len queue = {self.message_queue.qsize()}, peers {self.peers}")
+                self._process_alerts()
                 self._flush_queue()
-                self._poll_metadata()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
             logging.info("\nstopped")
         finally:
             self.z_ses.close()
+
+    def _process_alerts(self):
+        # Monitor existing torrents
+        with self.t_lock:
+            alerts = self.t_ses.pop_alerts()
+        
+        for alert in alerts:
+            # received metadata
+            logging.info(alert)
+            if isinstance(alert, lt.metadata_received_alert):
+                handle = alert.handle  # Direct handle reference attached to the alert!
+                logging.info(f"metadata received for torrent: {handle.info_hash()}")
+                self._handle_metadata_completion(handle)
+
+            # piece/file completed
+            elif isinstance(alert, lt.file_completed_alert):
+                handle = alert.handle  # Direct handle reference!
+                file_idx = alert.index # The file/piece index that completed
+                logging.info(f"file {file_idx} completed on torrent: {handle.info_hash()}")
+            
+                # Directly execute your policy update on that specific handle
+                self._on_file_completed(handle)
+            
+            # connection/debug            
+            elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
+                logging.debug(f"peer event: {alert}")
 
     def _flush_queue(self):
         """
@@ -165,68 +194,55 @@ class MutablePeer:
                         logging.debug(f"attempting connect_peer to {(ip, p)}")
                         new_handle.connect_peer((ip, p))
 
-        # Monitor existing torrents
-        with self.t_lock:
-            for handle in self.t_ses.get_torrents():
-                s = handle.status()
-                logging.debug(f"progress {s.progress*100:.1f}%, handle {handle.info_hash()}")
-                if not handle.is_valid():
-                    logging.debug(f"handle is invalid")
-                    continue
-
-                if s.paused or s.state == lt.torrent_status.states.queued_for_checking:
-                    logging.debug(f"handle is paused")
-                    continue
-
-                for a in self.t_ses.pop_alerts():
-                    if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
-                                    lt.peer_error_alert, lt.metadata_failed_alert,
-                                    lt.metadata_received_alert)):
-                        logging.debug(f"[Peer] alert: {a}")
-
-    def _poll_metadata(self):
+    def _handle_metadata_completion(self, handle):
         """
-        torrent sessions don't immediately have metadata available.
-        waiting in flush_queue blocks the thread
+        callback for metadata alerts. process metadata and send to reconstitutor
         """
+        # get torrent info (metadata)
+        info = handle.get_torrent_info()
+        infohash_bytes = bytes(info.info_hash().to_bytes())
+                
+        if infohash_bytes in self.processed_metadata_hashes:
+            return
+
+        # find associated robot_id
+        robot_id = None
+        for rid, mi in self.mutable_items.items():
+            mi_hash =  mi['infohash']
+            if isinstance(mi_hash, (bytearray, memoryview)):
+                mi_hash = bytes(mi_hash)
+
+            if mi_hash == infohash_bytes:
+                robot_id = rid
+                break
+        
+        if robot_id is None:
+            return
+
+        metadata = info.metadata()
+
+        # orchestrator callback
+        if metadata and self.on_metadata_received:
+            logging.info(f"poll_metadata updated for robot {robot_id}")
+            self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
+            self.processed_metadata_hashes.add(infohash_bytes)               
+
+    def _on_file_completed(self, handle):
+        """
+        Triggered when a file is completed downloading
+        - reassign piece priorities for that handle according to the policy
+        """
+        # this handle is
         with self.t_lock:
-            for handle in self.t_ses.get_torrents():
-                if not handle.has_metadata():
-                    continue
-
-                priorities = handle.get_file_priorities()
-                logger.info(f"[Peer]: file priorities {len(priorities)}")
-                downloaded_mask = list(handle.status().pieces)
-                logger.info(f"[Peer]: downloaded mask {len(downloaded_mask), np.sum(downloaded_mask)}")
-
-                # get torrent info (metadata)
-                info = handle.get_torrent_info()
-                infohash_bytes = bytes(info.info_hash().to_bytes())
-                
-                if infohash_bytes in self.processed_metadata_hashes:
-                    continue
-
-                # find associated robot_id
-                robot_id = None
-                for rid, mi in self.mutable_items.items():
-                    mi_hash =  mi['infohash']
-                    if isinstance(mi_hash, (bytearray, memoryview)):
-                        mi_hash = bytes(mi_hash)
-
-                    if mi_hash == infohash_bytes:
-                        robot_id = rid
-                        break
-                
-                if robot_id is None:
-                    continue
-
-                metadata = info.metadata()
-
-                # orchestrator callback
-                if metadata and self.on_metadata_received:
-                    logging.info(f"[Peer] poll_metadata updated for robot {robot_id}")
-                    self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
-                    self.processed_metadata_hashes.add(infohash_bytes)               
+            if not handle.is_valid():
+                return
+            
+            logging.info(f"applying {self.policy.__name__} policy  to handle {handle.info_hash()}")
+            priorities = handle.get_piece_priorities() # pieces same as files
+            downloaded_mask = list(handle.status().pieces)
+            new_priorities = self.policy(priorities, downloaded_mask, self.pol_param)
+            logging.info(f"new_priorities \t{new_priorities}")
+            handle.prioritize_files(new_priorities)
 
     def on_sample(self, sample):
         logging.info("Received Zenoh message")
@@ -245,9 +261,11 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--posegraph', required=True,help="Bag name (subdirectory under folder_path)")
     parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
     parser.add_argument('--poll_hz', type=float, default = 0.25)
+    parser.add_argument('-r', '--policy', type=str, default = 'rarest-random', help='piece picker options rarest-random, sequential, cascading, hybrid, sequence-random')
     args = parser.parse_args()
     robot_id = os.getenv("ROBOT_ID")
     posegraph=args.posegraph
+    policy = get_policy(args.policy)
 
     with open(f'torrent/{args.peer_params}', "r") as f:
                 params = json.load(f)
@@ -260,6 +278,7 @@ if __name__ == "__main__":
         posegraph=posegraph,
         state=state,
         robot_id=robot_id,
+        policy=policy,
         poll_hz=args.poll_hz
     )
     mutable_peer.run()
