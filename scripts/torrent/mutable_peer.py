@@ -244,8 +244,11 @@ class MutablePeer:
             priorities = handle.get_piece_priorities() # pieces same as files
             downloaded_mask = list(handle.status().pieces)
             new_priorities = self.policy(priorities, downloaded_mask, self.pol_param)
-            logging.info(f"new_priorities \t{new_priorities}")
-            handle.prioritize_files(new_priorities)
+            lt_priorities = new_priorities.astype(int).tolist()
+            # logging.info(f"new_priorities \t{lt_priorities}")
+            check = handle.get_piece_priorities() # pieces same as files
+            logging.info(f"new_priorities \t{check}")
+            handle.prioritize_files(lt_priorities)
 
     def on_sample(self, sample):
         logging.info("Received Zenoh message")
