@@ -3,6 +3,9 @@ from posegraph.live_reconstitution import Reconstitutor
 from torrent.mutable_seeder import MutableSeeder
 from torrent.mutable_peer import MutablePeer
 from torrent.torrent_utils import unpack_device
+from torrent.piece_pickers import (
+    get_policy, rarest_random, sequential, cascading, hybrid, sequence_random
+)
 from utils import *
 
 import zenoh
@@ -23,7 +26,7 @@ class Orchestrator:
     - 1 MutablePeer (spawns MutableSeeders)
     - 1 Reconstitutor
     """
-    def __init__(self, seeder_params: dict, peer_params: dict, state:dict, robot_id: int, posegraph: str):
+    def __init__(self, seeder_params: dict, peer_params: dict, state:dict, robot_id: int, posegraph: str, policy: str):
         VTRTEMP = os.getenv("VTRTEMP")
         
         # source_pg = f"{VTRTEMP}/pgs/{posegraph}/graph" # input posegraph to dec
@@ -38,8 +41,9 @@ class Orchestrator:
         
         self.robot_id = robot_id
         self.posegraph = posegraph
+        self.policy = get_policy(policy)
 
-        logging.info(f"init with id {robot_id}, posegraph {posegraph}")
+        logging.info(f"init with id {robot_id}, posegraph {posegraph}, policy {policy}")
 
         # zenoh session for this device
         self.my_ip, z_cfg = unpack_device(seeder_params, self.robot_id)
@@ -48,12 +52,19 @@ class Orchestrator:
 
         # libtorrent session for this device
         self.t_lock = threading.Lock()
+        alert_mask = (
+            lt.alert_category.status
+            | lt.alert_category.file_progress
+            | lt.alert_category.storage
+            | lt.alert_category.error
+            | lt.alert_category.peer
+        )
         self.t_ses = lt.session({
             "listen_interfaces": f"0.0.0.0:{LT_PORT},[::]:{LT_PORT}",
             "enable_dht": False,
             "enable_outgoing_utp": False,
             "enable_incoming_utp": False,
-            "alert_mask": lt.alert.category_t.all_categories,
+            "alert_mask": alert_mask
         })
 
 
@@ -88,6 +99,7 @@ class Orchestrator:
             posegraph=self.posegraph,
             state=state,
             robot_id=robot_id,
+            policy = self.policy,
             z_ses=self.z_ses,
             t_ses=self.t_ses,
             t_lock=self.t_lock,
@@ -155,9 +167,11 @@ if __name__ == "__main__":
     parser.add_argument('-s', '--seeder_params', type=str, default = 'seeder_params.json')
     parser.add_argument('-l', '--peer_params', type=str, default = 'peer_params.json')
     parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
+    parser.add_argument('-r', '--policy', type=str, default = 'rarest-random', help='piece picker options rarest-random, sequential, cascading, hybrid, sequence-random')
     args = parser.parse_args()
     robot_id = os.getenv("ROBOT_ID")
     posegraph = args.posegraph
+    policy = args.policy
     setup_logging(robot_id=robot_id, posegraph=posegraph, log_dir="logs")
 
     with open(f'torrent/{args.seeder_params}', "r") as f:
@@ -172,7 +186,8 @@ if __name__ == "__main__":
         peer_params=peer_params,
         state=state,
         robot_id=robot_id,
-        posegraph=posegraph
+        posegraph=posegraph,
+        policy = policy
     )
 
     orchestrator.run()
