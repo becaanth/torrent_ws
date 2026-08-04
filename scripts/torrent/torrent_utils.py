@@ -17,8 +17,8 @@ ROBOT_IPS = {
 
 # Anthonys laptop
 DOCKER_IPS = {
-    'torrent0':'172.18.0.2',
-    'torrent15':'172.18.0.3',
+    'torrent15':'172.18.0.2',
+    'torrent1':'172.18.0.3',
     'torrent2':'172.18.0.4',
     'torrent3':'172.18.0.4',
     'torrent4':'172.18.0.3',
@@ -26,7 +26,6 @@ DOCKER_IPS = {
 }
 
 Z_PORT=5203
-
 
 # -------------------------
 # Persistence
@@ -172,3 +171,49 @@ def unpack_device(params: dict, robot_id):
 
     print(f"[unpack] Role: PEER | My IP: {my_ip} | Listening: tcp/0.0.0.0:{Z_PORT}")
     return my_ip, cfg
+
+def verify_piece_file_alignment(info):
+    """
+    Verify that every non-pad file starts and ends exactly on a piece boundary,
+    i.e. piece i <-> file i is a valid 1:1 mapping.
+    """
+    files = info.files()
+    piece_length = info.piece_length()
+    num_pieces = info.num_pieces()
+
+    real_file_indices = []
+    for i in range(files.num_files()):
+        if files.file_flags(i) & files.flag_pad_file:
+            continue  # skip pad files
+        real_file_indices.append(i)
+
+        offset = files.file_offset(i)
+        size = files.file_size(i)
+
+        if offset % piece_length != 0:
+            raise AssertionError(
+                f"file {i} ({files.file_name(i)}) starts at byte {offset}, "
+                f"not aligned to piece boundary ({piece_length})"
+            )
+        if size > piece_length:
+            raise AssertionError(
+                f"file {i} ({files.file_name(i)}) size {size} exceeds piece_length "
+                f"{piece_length}; not 1:1 with a single piece"
+            )
+        # end boundary is implicitly fine if offset is aligned and size <= piece_length,
+        # since padding fills the rest of that piece
+
+    if len(real_file_indices) != num_pieces:
+        # padding could make this equal even with extra pad files,
+        # but a mismatch here means something is off
+        print(
+            f"num real files ({len(real_file_indices)}) != num_pieces ({num_pieces}); "
+            f"1:1 mapping assumption may not hold"
+        )
+
+    return real_file_indices
+
+def progress_bar(prio):
+    arr = np.array(prio)
+    result = "".join(arr.astype(str))
+    return result

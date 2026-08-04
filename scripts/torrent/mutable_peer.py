@@ -8,7 +8,7 @@ import os
 import argparse
 
 from .torrent_utils import *
-from .piece_pickers import get_policy
+from .piece_pickers import get_policy, ones_filter
 import logging
 
 import pdb
@@ -189,7 +189,8 @@ class MutablePeer:
                     with self.t_lock:
                         new_handle = self.t_ses.add_torrent({
                             'info_hash': mutable_item['infohash'],
-                            'save_path': self.output_path
+                            'save_path': self.output_path,
+                            'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
                         })
                     self.torrent_handles[robot_id] = new_handle
 
@@ -205,6 +206,11 @@ class MutablePeer:
         info = handle.get_torrent_info()
         infohash_bytes = bytes(info.info_hash().to_bytes())
                 
+        fs = info.files()
+        num_pieces = info.num_pieces()
+        num_files = fs.num_files()
+        logging.info(f'num_pieces {num_pieces}, num_files {num_files}')
+        
         if infohash_bytes in self.processed_metadata_hashes:
             return
 
@@ -246,10 +252,10 @@ class MutablePeer:
             priorities = handle.get_piece_priorities() # pieces same as files
             downloaded_mask = list(handle.status().pieces)
             new_priorities = self.policy(priorities, downloaded_mask, self.pol_param)
-            lt_priorities = new_priorities.astype(int).tolist()
-            # logging.info(f"new_priorities \t{lt_priorities}")
+            filtered_priorities = ones_filter(new_priorities)
+            lt_priorities = filtered_priorities.astype(int).tolist()
             check = handle.get_piece_priorities() # pieces same as files
-            logging.info(f"new_priorities \t{check}")
+            logging.info(f"priorities: \n{check}")
             handle.prioritize_files(lt_priorities)
 
     def on_sample(self, sample):

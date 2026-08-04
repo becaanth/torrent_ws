@@ -1,6 +1,6 @@
 import numpy as np
 import random
-
+import pdb
 """
 Define Piece Picking policies
 """
@@ -10,7 +10,7 @@ def rarest_random(priorities, mask, _):
     Vanilla Rarest-First (all priorities=4)
     """
     # reset all priorities to 4
-    new_priorities = np.array([4 * bool(x) for x in priorities])
+    new_priorities = np.array([4 * (not bool(m)) for m in mask])
     return new_priorities
 
 def sequential(priorities, mask, _):
@@ -43,28 +43,40 @@ def hybrid(priorities, mask, thresh=0.5):
 
     return new_priorities
 
-def sequence_random(priorities, mask, n=10):
-    b = int(len(mask) / n) # bucket size
-    new_priorities = np.array([1 * bool(x) for x in priorities])
+def sequence_random(priorities, mask, b=10):
+    b = int(b)
+    n = len(mask) // b
+
+    new_priorities = np.zeros(len(mask), dtype=int)  # everything cancels/stays 0 by default
+
     # apply sequential to buckets
     n_seq = np.ones(n)
-    n_mask = []
-    for m in range(n):
-        if np.sum(mask[m*b:(m+1)*b]) == b: # all pieces in this seq downloaded
-            n_mask.append(True)
-        else:
-            n_mask.append(False)
+    n_mask = [
+        np.sum(mask[m*b:(m+1)*b]) == b
+        for m in range(n)
+    ]
 
     buckets = sequential(n_seq, n_mask, -1)
     idx = np.argmax(buckets) # max bucket
+
     low = idx*b
-    upp = (idx+1)*b
+    upp = (idx + 1) * b if idx < n - 1 else len(mask)
     sub_bucket = priorities[low:upp]
     sub_mask = mask[low:upp]
 
     new_bucket = rarest_random(sub_bucket, sub_mask, -1)
     new_priorities[low:upp] = new_bucket
     return new_priorities
+
+def ones_filter(prio):
+    """
+    floor all priority=1 to =0 to cancel in-flight requests
+    need this to cancel in-flight
+    """
+    prio_copy = prio.copy()
+    prio_copy[np.where(prio_copy == 1)] = 0
+    return prio_copy
+
 
 def get_policy(arg : str):
     if arg == 'sequential' or arg == 's':
