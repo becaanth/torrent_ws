@@ -1,6 +1,5 @@
 import numpy as np
 import random
-import pdb
 
 """
 Define Piece Picking policies
@@ -12,7 +11,7 @@ def rarest_random(priorities, mask, _):
     """
     # reset all priorities to 4
     new_priorities = np.array([4 * bool(x) for x in priorities])
-    return new_priorities.astype(int).tolist()
+    return new_priorities
 
 def sequential(priorities, mask, _):
     """
@@ -29,7 +28,7 @@ def sequential(priorities, mask, _):
         if p > 1:
             p -= 1
 
-    return new_priorities.astype(int).tolist()
+    return new_priorities
 
 def cascading(priorities, mask):
     pass
@@ -38,11 +37,11 @@ def hybrid(priorities, mask, thresh=0.5):
     # with probability s use sequential, (1-s) use rarest_first 
     s = random.random()
     if s < thresh:
-        new_priorities = sequential(priorities, mask, _)
+        new_priorities = sequential(priorities, mask, -1)
     else:
-        new_priorities = rarest_random(priorities, mask, _)
+        new_priorities = rarest_random(priorities, mask, -1)
 
-    return new_priorities.astype(int).tolist()
+    return new_priorities
 
 def sequence_random(priorities, mask, n=10):
     b = int(len(mask) / n) # bucket size
@@ -56,16 +55,16 @@ def sequence_random(priorities, mask, n=10):
         else:
             n_mask.append(False)
 
-    buckets = sequential(n_seq, n_mask, _)
+    buckets = sequential(n_seq, n_mask, -1)
     idx = np.argmax(buckets) # max bucket
     low = idx*b
     upp = (idx+1)*b
     sub_bucket = priorities[low:upp]
     sub_mask = mask[low:upp]
 
-    new_bucket = rarest_random(sub_bucket, sub_mask, _)
+    new_bucket = rarest_random(sub_bucket, sub_mask, -1)
     new_priorities[low:upp] = new_bucket
-    return new_priorities.astype(int).tolist()
+    return new_priorities
 
 def get_policy(arg : str):
     if arg == 'sequential' or arg == 's':
