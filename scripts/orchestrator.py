@@ -26,7 +26,7 @@ class Orchestrator:
     - 1 MutablePeer (spawns MutableSeeders)
     - 1 Reconstitutor
     """
-    def __init__(self, seeder_params: dict, peer_params: dict, state:dict, robot_id: int, posegraph: str, policy: str):
+    def __init__(self, seeder_params: dict, peer_params: dict, state:dict, robot_id: int, posegraph: str, policy: str, pol_param : float):
         VTRTEMP = os.getenv("VTRTEMP")
         
         # source_pg = f"{VTRTEMP}/pgs/{posegraph}/graph" # input posegraph to dec
@@ -42,6 +42,7 @@ class Orchestrator:
         self.robot_id = robot_id
         self.posegraph = posegraph
         self.policy = get_policy(policy)
+        self.pol_param = pol_param
 
         logging.info(f"init with id {robot_id}, posegraph {posegraph}, policy {policy}")
 
@@ -100,6 +101,7 @@ class Orchestrator:
             state=state,
             robot_id=robot_id,
             policy = self.policy,
+            pol_param=self.pol_param,
             z_ses=self.z_ses,
             t_ses=self.t_ses,
             t_lock=self.t_lock,
@@ -168,10 +170,12 @@ if __name__ == "__main__":
     parser.add_argument('-l', '--peer_params', type=str, default = 'peer_params.json')
     parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
     parser.add_argument('-r', '--policy', type=str, default = 'rarest-random', help='piece picker options rarest-random, sequential, cascading, hybrid, sequence-random')
+    parser.add_argument('-x', '--pol_param', type=float, default = 1.0, help='piece picker param (for hybrid is s, for sequence-random is N)')
     args = parser.parse_args()
     robot_id = os.getenv("ROBOT_ID")
     posegraph = args.posegraph
     policy = args.policy
+    pol_param = float(args.pol_param)
     setup_logging(robot_id=robot_id, posegraph=posegraph, log_dir="logs")
 
     with open(f'torrent/{args.seeder_params}', "r") as f:
@@ -187,7 +191,8 @@ if __name__ == "__main__":
         state=state,
         robot_id=robot_id,
         posegraph=posegraph,
-        policy = policy
+        policy = policy,
+        pol_param=pol_param
     )
 
     orchestrator.run()
