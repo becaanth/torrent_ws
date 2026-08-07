@@ -115,7 +115,6 @@ def inspect_torrent(encoded_info):
                 ))
             pieces.append(Piece(top_vertices=vertices, top_edges=edges, metadata_written=False, data_ingested=False))
 
-    print(f"is pieces None? {pieces==None}, idx None? {idx['idx']==None}")
     return pieces, idx['idx']
 
 def on_mutable_item(sample):
