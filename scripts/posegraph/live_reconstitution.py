@@ -411,7 +411,7 @@ class Reconstitutor:
 
         piece.skeleton_rowids = rowids
         piece.metadata_written = True
-        # logging.info(f"_write_metadata: {time.time() - s}")
+        logging.info(f"_write_metadata: {piece.top_vertices[0].vertex_id}")
 
     def _write_message(self, piece: Piece):
         """
@@ -465,7 +465,7 @@ class Reconstitutor:
                     ])
                 
                 conn.execute("COMMIT;")
-                # logging.info(f"_write_message: {hex(piece.top_vertices[0].vertex_id)}")
+                logging.info(f"_write_message: {piece.top_vertices[0].vertex_id}")
 
     def _write_index(self, index_msg):
         # write index.db3, containing MapInfo message
