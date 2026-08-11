@@ -23,17 +23,13 @@ def setup_logging(robot_id: str, posegraph: str, log_dir: str = "logs"):
     root_logger.setLevel(logging.DEBUG)
     
     # 1. File Handler (Max 10 MB per file, keeps up to 5 backup logs)
-    try:
-        file_handler = RotatingFileHandler(
-            log_filename, maxBytes=10 * 1024 * 1024, backupCount=5
-        )
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(logging.DEBUG)
+    file_handler = RotatingFileHandler(
+        log_filename, maxBytes=10 * 1024 * 1024, backupCount=5
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.DEBUG)
 
-        root_logger.addHandler(file_handler)
-
-    except:
-        print("[logger]: read-only filesystem")
+    root_logger.addHandler(file_handler)
 
     # 2. Console Handler
     console_handler = logging.StreamHandler()
