@@ -21,6 +21,7 @@ def setup_logging(robot_id: str, posegraph: str, log_dir: str = "logs"):
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
+    root_logger.handlers.clear()
     
     # 1. File Handler (Max 10 MB per file, keeps up to 5 backup logs)
     file_handler = RotatingFileHandler(
@@ -28,16 +29,12 @@ def setup_logging(robot_id: str, posegraph: str, log_dir: str = "logs"):
     )
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.DEBUG)
-
     root_logger.addHandler(file_handler)
 
     # 2. Console Handler
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
     console_handler.setLevel(logging.INFO)
-
-    # Avoid duplicate handlers if re-initialized
-    root_logger.handlers.clear()
     root_logger.addHandler(console_handler)
     
     logging.info(f"Logging initialized. Output file: {log_filename}")
