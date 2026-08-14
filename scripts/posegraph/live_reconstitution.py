@@ -205,25 +205,19 @@ class Reconstitutor:
                     poll_data = self._parse_piece(folder_name, db_file)
                     # skip incomplete data
                     if not poll_data:
-                        logging.error(f"poll data empty")
                         continue
                     if poll_data['vertices'].empty:
-                        logging.error(f"\t missing vertices")
                         continue
                     if poll_data['edges'].empty:
-                        logging.error(f"\t missing edges")
                         continue
                     if poll_data['pointmap'].empty:
-                        logging.error(f"\t missing pointmap")
                         continue
                     if poll_data['pointmap_ptr'].empty:
-                        logging.error(f"\t missing pointmap_ptr")
                         continue
 
                     # if this robot's pieces
                     if folder_name == self.robot_id:
                         # self._ingest_local_piece(poll_data)
-                        # logging.debug(f"ingest local piece {db_file}")
                         logging.debug(f"local piece, skip {db_file}")
 
                     else:
@@ -496,22 +490,6 @@ class Reconstitutor:
     def _close(self):
         # nothing to flush, each write closes its own connections
         logging.info("connections closed.")
-
-# +++++++++++++ HELPERS ++++++++++++++++
-def preview_piece(piece):
-    edges = piece['edges']
-    vertices = piece['vertices']
-
-    to_id = inspect_ros_data(edges.iloc[-1]).to_id
-
-    v0 = inspect_ros_data(vertices.iloc[0]).id
-    vf = inspect_ros_data(vertices.iloc[-1]).id
-
-    preview = f"""
-        Preview:
-        v0: {hex(v0)}, vf: {hex(vf)}, Egress: {hex(to_id)}, 
-    """
-    print(preview)
 
 
 if __name__ == "__main__":
