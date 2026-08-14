@@ -9,7 +9,7 @@ from posegraph.posegraph_utils import *
 # DEVICE CONFIGS
 ROBOT_IPS = {
     'base' : '10.223.0.10', # this is Anthonys laptop; ip route get 1.1.1.1 | awk '{print $7}'
-    # 'mr_green':'192.168.2.42',
+    'mr_green':'192.168.2.42',
     'prof_plum':'192.168.3.42',
     # 'col_mustard':'192.168.4.42',
     'mrs_peacock':'192.168.5.42' 
@@ -62,6 +62,9 @@ def has_new_file(directory, last_count=[0]):
         tf = False
     return tf
 
+def is_piece_valid(input_file):
+    pass
+
 def sqlite_file_filter(file_path: str) -> bool:
     """
     Returns True if .db3, else False
@@ -73,7 +76,7 @@ def sqlite_file_filter(file_path: str) -> bool:
     if filename.endswith('.db3-wal') or filename.endswith('.db3-journal'):
         print(f"Skipping temporary SQLite file: {filename}")
         return False
-        
+
     return True
 
 def mutable_to_string(mutable_item):
@@ -129,8 +132,6 @@ def on_mutable_item(sample):
     }
 
     return mutable_item
-
-
 
 def unpack_device(params: dict, robot_id):
     """
