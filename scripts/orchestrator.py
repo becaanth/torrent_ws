@@ -161,7 +161,7 @@ class Orchestrator:
 
     def handle_torrent_update(self, robot_id, mutable_item):
         logging.info(f"handle_torrent_update for id {robot_id}")
-        # self.fleet[robot_id].update_mutable_item(mutable_item) # TODO: ANTHONY UNCOMMENT THIS
+        self.fleet[robot_id].update_mutable_item(mutable_item) # TODO: ANTHONY UNCOMMENT THIS
 
     def run(self):
         logging.info("[agent.run]")
