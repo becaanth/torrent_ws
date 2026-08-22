@@ -3,11 +3,14 @@ import pandas as pd
 import numpy as np
 import os
 import yaml
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
+
+logger = logging.getLogger(__name__)
 
 # general utils
 def inspect_ros_data(frame):
@@ -25,7 +28,7 @@ def pad_file_to_exact_size(path, target_size):
 
     missing = target_size - current_size
     if missing == 0:
-        print("map size == padding")
+        logging.info("map size == padding")
         return
 
     with open(path, "ab") as f:
@@ -116,7 +119,7 @@ def get_db3_elements(bag_path, which_data):
         }
     
     else:
-        print('[deconstruct_posegraph]: invalid topic requested')
+        logging.info('[deconstruct_posegraph]: invalid topic requested')
 
     conn.close()
     return res
@@ -151,7 +154,7 @@ def write_metadata_yaml(df, bag_dir, topic_name, topic_type, segment_num, partia
         nanoseconds_since_epoch = int(df['timestamp'].min())
         duration_nanoseconds = int(df['timestamp'].max() - nanoseconds_since_epoch)
 
-    print(f's: {nanoseconds_since_epoch}, d: {duration_nanoseconds}, #: {num_messages}')
+    logging.info(f's: {nanoseconds_since_epoch}, d: {duration_nanoseconds}, #: {num_messages}')
 
     metadata = {
         "rosbag2_bagfile_information": {
@@ -181,7 +184,7 @@ def write_metadata_yaml(df, bag_dir, topic_name, topic_type, segment_num, partia
     with open(yaml_path, 'w') as f:
         yaml.dump(metadata, f, sort_keys=False)
 
-    print(f"metadata.yaml written to {yaml_path}")
+    logging.info(f"metadata.yaml written to {yaml_path}")
 
 def write_rosbag(df, bag_path, topic_name, topic_type, segment_num, partial):
     if topic_name == 'index':
@@ -235,7 +238,7 @@ def write_rosbag(df, bag_path, topic_name, topic_type, segment_num, partial):
 
     conn.commit()
     conn.close()
-    print(f"Wrote ROS2 bag for topic {topic_name}: {db_path}")
+    logging.info(f"Wrote ROS2 bag for topic {topic_name}: {db_path}")
 
 def write_rosbag_from_df(df, output_dir, segment_num, partial):
     """
@@ -305,7 +308,7 @@ class Piece:
     pointmap_ptr: Optional[pd.DataFrame] = None
 
     def __repr__(self):
-        return f"First vid {self.top_vertices[0].vertex_id}, last vid {self.top_vertices[-1].vertex_id} \n \tvertices: {self.vertices is None} \n\tedges: {self.edges is None} \n\tpointmap: {self.pointmap is None} \n\tpointmap_ptr: {self.pointmap_ptr is None}"
+        return f"first vid {self.top_vertices[0].vertex_id}, last vid {self.top_vertices[-1].vertex_id} \n \tvertices: {self.vertices is not None} \n\tedges: {self.edges is not None} \n\tpointmap: {self.pointmap is not None} \n\tpointmap_ptr: {self.pointmap_ptr is not None}"
 
 def parse_chunk(db_path: str) -> tuple[list[Vertex], list[Edge]]:
     """
@@ -327,9 +330,9 @@ def parse_chunk(db_path: str) -> tuple[list[Vertex], list[Edge]]:
                 msg = deserialize_message(row["data"], get_message(row["topic_type"]))
                 vertices.append(Vertex(vertex_id=int(msg.id)))
             except Exception as exc:
-                print(f"[parse_chunk] vertex deserialize error in {db_path}: {exc}")
+                logging.info(f" vertex deserialize error in {db_path}: {exc}")
     except Exception as exc:
-        print(f"[parse_chunk] no vertices table in {db_path}: {exc}")
+        logging.info(f" no vertices table in {db_path}: {exc}")
 
     # --- edges --------------------------------------------------------------
     try:
@@ -346,9 +349,9 @@ def parse_chunk(db_path: str) -> tuple[list[Vertex], list[Edge]]:
                 cov = np.array(msg.t_to_from.cov).reshape(6, 6)
                 edges.append(Edge(from_id=int(msg.from_id), to_id=int(msg.to_id), mode=int(msg.mode.mode), type=int(msg.type.type),  xi=xi)) # ignore cov, cov=cov))
             except Exception as exc:
-                print(f"[parse_chunk] edge deserialize error in {db_path}: {exc}")
+                logging.info(f" edge deserialize error in {db_path}: {exc}")
     except Exception as exc:
-        print(f"[parse_chunk] no edges table in {db_path}: {exc}")
+        logging.info(f" no edges table in {db_path}: {exc}")
 
     conn.close()
     return vertices, edges

@@ -7,6 +7,7 @@ from torrent.piece_pickers import (
     get_policy, rarest_random, sequential, cascading, hybrid, sequence_random
 )
 from utils import *
+import logging
 
 import zenoh
 import libtorrent as lt
@@ -43,6 +44,9 @@ class Orchestrator:
         self.posegraph = posegraph
         self.policy = get_policy(policy)
         self.pol_param = pol_param
+        self.seeder_params = seeder_params
+        self.peer_params = peer_params
+        self.state = state
 
         logging.info(f"init with id {robot_id}, posegraph {posegraph}, policy {policy}")
 
@@ -80,7 +84,7 @@ class Orchestrator:
         # from pieces, pub Zenoh, seed torrent
         # dict of {'robot_id' : robot_id, 'seed' : mutable_seeder}
         mutable_seeder = MutableSeeder(
-            params=seeder_params,
+            params=self.seeder_params,
             posegraph=self.posegraph,
             this_robot_id=self.robot_id,
             robot_id=self.robot_id,
@@ -92,11 +96,13 @@ class Orchestrator:
         )
         self.fleet = {}
         self.fleet[self.robot_id] = mutable_seeder
+        self.fleet_lock = threading.Lock()
+        self.threads = {}
 
         # discover torrents from zenoh, leech, spawn MutableSeeders
         self.metadata = {}
         self.peer = MutablePeer(
-            params=peer_params,
+            params=self.peer_params,
             posegraph=self.posegraph,
             state=state,
             robot_id=robot_id,
@@ -122,21 +128,30 @@ class Orchestrator:
     def handle_torrent_discovered(self, robot_id, mutable_item):
         # new torrent discovered; spawn a new seeder (cb from mutable_peer)
         logging.info(f"handle_torrent_discovered, id {robot_id}")
-        # mutable_seeder = MutableSeeder( # TODO: ANTHONY UNCOMMENT THIS
-        #     params=seeder_params,
-        #     posegraph=self.posegraph,
-        #     this_robot_id=self.robot_id,
-        #     robot_id=robot_id,
-        #     mutable_item=mutable_item,
-        #     state=state,
-        #     z_ses=self.z_ses,
-        #     t_ses=self.t_ses,
-        #     t_lock=self.t_lock,
-        #     my_ip=self.my_ip
-        # )
-        # self.fleet[robot_id] = mutable_seeder
-        # new_thread = threading.Thread(target=self.fleet[robot_id].run, daemon=True)
-        # new_thread.start()
+        with self.fleet_lock:
+            existing_thread = self.threads.get(robot_id)
+            if existing_thread is not None and existing_thread.is_alive():
+                logging.info(f"Seeder for robot_id {robot_id} already active; ignoring rediscovery")
+                return
+            if existing_thread is not None:
+                logging.warning(f"Stale seeder entry for robot_id {robot_id} found (thread died); respawning")
+
+            mutable_seeder = MutableSeeder(
+                params=self.seeder_params,
+                posegraph=self.posegraph,
+                this_robot_id=self.robot_id,
+                robot_id=robot_id,
+                mutable_item=mutable_item,
+                state=self.state,
+                z_ses=self.z_ses,
+                t_ses=self.t_ses,
+                t_lock=self.t_lock,
+                my_ip=self.my_ip
+            )
+            self.fleet[robot_id] = mutable_seeder
+            new_thread = threading.Thread(target=self.fleet[robot_id].run, daemon=True, name=f"SeederThread{robot_id}")
+            self.threads[f"seed{robot_id}"] = new_thread
+            new_thread.start()
 
     def handle_metadata_received(self, robot_id, topology):
         # topology update, pass to reconstitutor (cb from mutable_peer)
@@ -150,18 +165,28 @@ class Orchestrator:
 
     def run(self):
         logging.info("[agent.run]")
-        dec_thread = threading.Thread(target=self.dec.run, daemon=True)
-        dec_thread.start()
-        seed_thread = threading.Thread(target=self.fleet[self.robot_id].run, daemon=True)
-        seed_thread.start()
-        peer_thread = threading.Thread(target=self.peer.run, daemon=True)
-        peer_thread.start()
-        rec_thread  = threading.Thread(target=self.rec.run, daemon=True)
 
-        rec_thread.start()
+        with self.fleet_lock:             
+            self.threads["dec"] = threading.Thread(target=self.dec.run, daemon=True, name="DeconstitutorThread")
+            self.threads[f"seed{self.robot_id}"] = threading.Thread(target=self.fleet[self.robot_id].run, daemon=True, name=f"SeederThread{self.robot_id}")
+            self.threads["peer"] = threading.Thread(target=self.peer.run, daemon=True, name="PeerThread")
+            self.threads["rec"] =threading.Thread(target=self.rec.run, daemon=True,name="ReconstitutorThread")
+            startup_threads = list(self.threads.values())
 
-        dec_thread.join()
+        for t in startup_threads:
+            t.start()
 
+        try:
+            while True:
+                with self.fleet_lock:
+                    live_threads = list(self.threads.values())
+                if not any(t.is_alive() for t in live_threads):
+                    logging.warning("All orchestrator threads have exited; shutting down")
+                    break
+                for t in live_threads:
+                    t.join(timeout=1.0)
+        except KeyboardInterrupt:
+            logging.info("Interrupted, shutting down orchestrator")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Teach, Torrent, Repeat Agent")
@@ -173,26 +198,34 @@ if __name__ == "__main__":
     parser.add_argument('-x', '--pol_param', type=float, default = 1.0, help='piece picker param (for hybrid is s, for sequence-random is N)')
     args = parser.parse_args()
     robot_id = os.getenv("ROBOT_ID")
+    if not robot_id:
+        raise RuntimeError("ROBOT_ID environment variable must be set")
+    
     posegraph = args.posegraph
     policy = args.policy
     pol_param = float(args.pol_param)
     setup_logging(robot_id=robot_id, posegraph=posegraph, log_dir="logs")
 
-    with open(f'torrent/{args.seeder_params}', "r") as f:
+    try:
+        with open(f'torrent/{args.seeder_params}', "r") as f:
                 seeder_params = json.load(f)
-    with open(f'torrent/{args.peer_params}', "r") as f:
+        with open(f'torrent/{args.peer_params}', "r") as f:
                 peer_params = json.load(f)
-    with open(f'torrent/{args.state_file}', "r") as f:
+        with open(f'torrent/{args.state_file}', "r") as f:
                 state = json.load(f)
 
-    orchestrator = Orchestrator(
-        seeder_params=seeder_params,
-        peer_params=peer_params,
-        state=state,
-        robot_id=robot_id,
-        posegraph=posegraph,
-        policy = policy,
-        pol_param=pol_param
-    )
+        orchestrator = Orchestrator(
+            seeder_params=seeder_params,
+            peer_params=peer_params,
+            state=state,
+            robot_id=robot_id,
+            posegraph=posegraph,
+            policy = policy,
+            pol_param=pol_param
+        )
 
-    orchestrator.run()
+        orchestrator.run()
+    except Exception as e:
+        logging.exception(f"Fatal error occured during execution: {e}")
+    finally:
+        flush_logs()

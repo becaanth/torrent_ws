@@ -1,6 +1,8 @@
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import sys
+import threading
 from datetime import datetime
 
 def setup_logging(robot_id: str, posegraph: str, log_dir: str = "logs"):
@@ -36,5 +38,31 @@ def setup_logging(robot_id: str, posegraph: str, log_dir: str = "logs"):
     console_handler.setFormatter(formatter)
     console_handler.setLevel(logging.INFO)
     root_logger.addHandler(console_handler)
-    
+
+    # Hooks to capture crashed threads/main thread & flush logs
+    sys.excepthook = handle_uncaught_exception
+    threading.excepthook = lambda args: handle_uncaught_exception(args.exc_type, args.exc_value, args.exc_traceback)
+
     logging.info(f"Logging initialized. Output file: {log_filename}")
+
+def flush_logs():
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+
+def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        # Allow standard CTRL+C exit without logging stack trace
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    # Log the thread name and full stack trace
+    logging.critical(
+        f"Thread crashed! Crashing orchestrator process...",
+        exc_info=(exc_type, exc_value, exc_traceback)
+    )
+    
+    # Guarantee disk write before exit
+    flush_logs()
+    
+    # Hard exit process immediately to force orchestrator shutdown
+    os._exit(1)
