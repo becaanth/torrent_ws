@@ -64,8 +64,8 @@ class MutablePeer:
         self.max_seq_seen = {} 
 
         # inversion of control callbacks
-        self.on_torrent_discovered = on_torrent_discovered # spawn MutableSeeder 
-        self.on_torrent_updated = on_torrent_updated # spawn MutableSeeder 
+        self.on_torrent_discovered = on_torrent_discovered # STALE! spawn MutableSeeder 
+        self.on_torrent_updated = on_torrent_updated # STALE! spawn MutableSeeder 
         self.on_metadata_received = on_metadata_received   # pass to Reconstitutor
 
         # etc
@@ -209,6 +209,20 @@ class MutablePeer:
                 for ip, p in self.peers:
                     logging.debug(f"attempting connect_peer to {(ip, p)}")
                     new_handle.connect_peer((ip, p))
+
+        # pass gossip along to other listening peers
+        self._forward_gossip(mutable_item)
+
+    def _forward_gossip(self, mutable_item):
+        """
+        Re-publish an accepted mutable item so it continues to propagate
+        across the MANET, sourced from this node's own IP.
+        """
+        relay_mi = dict(mutable_item)
+        relay_mi['my_ip'] = self.my_ip
+        payload = msgpack.packb(relay_mi, use_bin_type=True)
+        logging.debug(f"forwarding gossip for robot_id {relay_mi['robot_id']} seq {relay_mi['seq']}")
+        self.z_ses.put(f"mutable_items/{relay_mi['robot_id']}", payload)
 
     def _handle_metadata_completion(self, handle):
         """
