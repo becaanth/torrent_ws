@@ -210,8 +210,8 @@ class MutablePeer:
                     logging.debug(f"attempting connect_peer to {(ip, p)}")
                     new_handle.connect_peer((ip, p))
 
-        # pass gossip along to other listening peers
-        self._forward_gossip(mutable_item)
+            # pass gossip along to other listening peers
+            self._forward_gossip(mutable_item)
 
     def _forward_gossip(self, mutable_item):
         """
