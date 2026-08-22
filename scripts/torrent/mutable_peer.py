@@ -143,6 +143,9 @@ class MutablePeer:
                 continue
             self.max_seq_seen[robot_id] = seq
 
+            # pass gossip along to other listening peers
+            self._forward_gossip(mutable_item)
+
             peer_endpoint = (mutable_item['my_ip'], PORT)
             if peer_endpoint not in self.peers:
                 self.peers.append(peer_endpoint)
@@ -209,9 +212,6 @@ class MutablePeer:
                 for ip, p in self.peers:
                     logging.debug(f"attempting connect_peer to {(ip, p)}")
                     new_handle.connect_peer((ip, p))
-
-            # pass gossip along to other listening peers
-            self._forward_gossip(mutable_item)
 
     def _forward_gossip(self, mutable_item):
         """
