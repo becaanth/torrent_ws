@@ -39,6 +39,7 @@ class MutablePeer:
         # data params
         self.posegraph = posegraph
         self.state = state
+        self.max_seq_seen = {} 
 
         # file system
         self.output_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}_{self.robot_id}"
@@ -124,10 +125,19 @@ class MutablePeer:
             mutable_item = on_mutable_item(sample)
             logging.info(f"mutable item received \n {mutable_to_string(mutable_item)}")
 
-            # check if heard own seeder
-            if mutable_item['my_ip'] == self.my_ip:
-                logging.debug(f"WARNING flush skipping. don't leech own pieces")
+            robot_id = mutable_item['robot_id']
+            seq = mutable_item['seq']
+
+            if robot_id == self.robot_id:
+                logging.debug(f"skipping gossip about our own robot_id {self.robot_id}")
                 continue
+
+            # check for freshness
+            last_seq = self.max_seq_seen.get(robot_id, -1)
+            if seq <= last_seq:
+                logging.debug(f"ignoring stale seq {seq} for robot_id {robot_id}, have seq {last_seq}")
+                continue
+            self.max_seq_seen[robot_id] = seq
 
             peer_endpoint = (mutable_item['my_ip'], PORT)
             if peer_endpoint not in self.peers:
@@ -159,44 +169,42 @@ class MutablePeer:
             # if new infohash, remove old torrent session
             else:
                 saved_mi = self.mutable_items[robot_id]
-                if mutable_item['seq'] > saved_mi['seq']: # what if we torrent a completed map? then these are equal
-                    # overwrite mutable item
-                    logging.debug(f"overwrite \n\t {mutable_to_string(mutable_item)}")
-                    self.mutable_items[robot_id] = mutable_item
+                logging.debug(f"overwrite \n\t {mutable_to_string(mutable_item)}")
+                self.mutable_items[robot_id] = mutable_item
 
-                    # enforce robots authority on local sessions
-                    if self.on_torrent_updated is not None and mutable_item['robot_id']!=self.robot_id:
-                        self.on_torrent_updated(robot_id, mutable_item)
+                # enforce robots authority on local sessions
+                if self.on_torrent_updated is not None and mutable_item['robot_id']!=self.robot_id:
+                    self.on_torrent_updated(robot_id, mutable_item)
 
-                    # remove old torrent
-                    old_handle = self.torrent_handles.get(robot_id)
+                # remove old torrent
+                old_handle = self.torrent_handles.get(robot_id)
 
-                    if old_handle is not None and old_handle.is_valid():
-                        old_hash = bytes(old_handle.info_hash().to_bytes())
-                        new_hash = bytes(mutable_item['infohash'])
+                if old_handle is not None and old_handle.is_valid():
+                    old_hash = bytes(old_handle.info_hash().to_bytes())
+                    new_hash = bytes(mutable_item['infohash'])
 
-                        if old_hash == new_hash:
-                            # infohash has not changes
-                            continue
+                    if old_hash == new_hash:
+                        # infohash has not changes
+                        continue
 
-                        logging.debug(f"infohash updated for robot_id {robot_id}, replacing handle")
-                        self.processed_metadata_hashes.discard(old_hash)
-                        old_handle.pause()
-                        with self.t_lock:
-                            self.t_ses.remove_torrent(old_handle)
-                        self.torrent_handles.pop(robot_id, None)
-                    
+                    logging.debug(f"infohash updated for robot_id {robot_id}, replacing handle")
+                    self.processed_metadata_hashes.discard(old_hash)
+                    old_handle.pause()
                     with self.t_lock:
-                        new_handle = self.t_ses.add_torrent({
-                            'info_hash': mutable_item['infohash'],
-                            'save_path': self.output_path,
-                            'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
-                        })
-                    self.torrent_handles[robot_id] = new_handle
+                        self.t_ses.remove_torrent(old_handle)
+                    self.torrent_handles.pop(robot_id, None)
+                    
+                with self.t_lock:
+                    new_handle = self.t_ses.add_torrent({
+                        'info_hash': mutable_item['infohash'],
+                        'save_path': self.output_path,
+                        'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
+                    })
+                self.torrent_handles[robot_id] = new_handle
 
-                    for ip, p in self.peers:
-                        logging.debug(f"attempting connect_peer to {(ip, p)}")
-                        new_handle.connect_peer((ip, p))
+                for ip, p in self.peers:
+                    logging.debug(f"attempting connect_peer to {(ip, p)}")
+                    new_handle.connect_peer((ip, p))
 
     def _handle_metadata_completion(self, handle):
         """
