@@ -97,7 +97,8 @@ class MutableSeeder:
             self.z_ses.close()
 
     def _poll(self):
-        if len(os.listdir(self.input_path)) == 0:
+        curr_files = os.listdir(self.input_path)
+        if len(curr_files) == 0:
             return
 
         if has_new_file(self.input_path) or self.start_flag == False:
@@ -114,6 +115,7 @@ class MutableSeeder:
                 })
                 new_handle.unset_flags(lt.torrent_flags.paused | lt.torrent_flags.auto_managed)
             if self.current_handle is not None:
+                 logging.info(f"curr handle: {self.current_handle}")
                  self.current_handle.pause()
                  with self.t_lock:
                     self.t_ses.remove_torrent(self.current_handle)
