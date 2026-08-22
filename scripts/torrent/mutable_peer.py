@@ -81,7 +81,7 @@ class MutablePeer:
                 logging.debug(f"len queue = {self.message_queue.qsize()}, peers {self.peers}")
                 self._process_alerts()
                 self._flush_queue()
-                self._rebroadcast_known_items
+                self._rebroadcast_known_items()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
             logging.info("\nstopped")
@@ -225,6 +225,7 @@ class MutablePeer:
         """
         periodically re-announce everything currently known
         """
+        logging.debug(f"rebroadcasting known items")
         for robot_id, mutable_item in self.mutable_items.items():
             self._forward_gossip(mutable_item)
 
