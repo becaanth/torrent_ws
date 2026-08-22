@@ -39,7 +39,6 @@ class MutablePeer:
         # data params
         self.posegraph = posegraph
         self.state = state
-        self.max_seq_seen = {} 
 
         # file system
         self.output_path = f"{os.getenv('VTRTEMP')}/pcs/{self.posegraph}_{self.robot_id}"
@@ -62,6 +61,7 @@ class MutablePeer:
         self.mutable_items = {}
         self.torrent_handles = {}
         self.processed_metadata_hashes = set()  # Track infohashes we've already handled
+        self.max_seq_seen = {} 
 
         # inversion of control callbacks
         self.on_torrent_discovered = on_torrent_discovered # spawn MutableSeeder 
@@ -130,6 +130,10 @@ class MutablePeer:
 
             if robot_id == self.robot_id:
                 logging.debug(f"skipping gossip about our own robot_id {self.robot_id}")
+                continue
+
+            if mutable_item['my_ip'] == self.my_ip:
+                logging.debug(f"skipping gossip from our own seeder")
                 continue
 
             # check for freshness
