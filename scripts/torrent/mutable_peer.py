@@ -81,8 +81,8 @@ class MutablePeer:
                 logging.debug(f"len queue = {self.message_queue.qsize()}, peers {self.peers}")
                 self._process_alerts()
                 self._flush_queue()
-                # time.sleep(1.0 / self.poll_hz)
-                time.sleep(0.05)
+                self._rebroadcast_known_items
+                time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
             logging.info("\nstopped")
         finally:
@@ -142,9 +142,6 @@ class MutablePeer:
                 logging.debug(f"ignoring stale seq {seq} for robot_id {robot_id}, have seq {last_seq}")
                 continue
             self.max_seq_seen[robot_id] = seq
-
-            # pass gossip along to other listening peers
-            self._forward_gossip(mutable_item)
 
             peer_endpoint = (mutable_item['my_ip'], PORT)
             if peer_endpoint not in self.peers:
@@ -215,14 +212,21 @@ class MutablePeer:
 
     def _forward_gossip(self, mutable_item):
         """
-        Re-publish an accepted mutable item so it continues to propagate
-        across the MANET, sourced from this node's own IP.
+        instead of spawning a new seeder, creating conflicts at the snapshot level, use libtorrent to handle multi-seeding
         """
         relay_mi = dict(mutable_item)
         relay_mi['my_ip'] = self.my_ip
         payload = msgpack.packb(relay_mi, use_bin_type=True)
         logging.debug(f"forwarding gossip for robot_id {relay_mi['robot_id']} seq {relay_mi['seq']}")
         self.z_ses.put(f"mutable_items/{relay_mi['robot_id']}", payload)
+
+    
+    def _rebroadcast_known_items(self):
+        """
+        periodically re-announce everything currently known
+        """
+        for robot_id, mutable_item in self.mutable_items.items():
+            self._forward_gossip(mutable_item)
 
     def _handle_metadata_completion(self, handle):
         """
