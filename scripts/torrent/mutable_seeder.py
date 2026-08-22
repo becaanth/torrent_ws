@@ -75,6 +75,7 @@ class MutableSeeder:
         # etc
         self.poll_hz = poll_hz
         self.start_flag = False
+        self._last_file_count = 0
 
         # inversion of control callback
         self.on_torrent_updated = on_torrent_updated # -> update mutable item from remote
@@ -101,7 +102,7 @@ class MutableSeeder:
         if len(curr_files) == 0:
             return
 
-        if has_new_file(self.input_path) or self.start_flag == False:
+        if self._has_new_file() or self.start_flag == False:
             self.start_flag = True
 
             # create snapshot of pcs dir
@@ -152,6 +153,14 @@ class MutableSeeder:
                         lt.listen_succeeded_alert, lt.incoming_connection_alert)):
                         logging.info(f"[Seeder] alert: {a}")
 
+    def _has_new_file(self):
+        current_count = len(os.listdir(self.input_path))
+        if current_count > self._last_file_count:
+            self._last_file_count = current_count
+            return True
+        self._last_file_count = current_count
+        return False
+            
     def create_snapshot(self):
         """
         Generate new .torrent for a directory
