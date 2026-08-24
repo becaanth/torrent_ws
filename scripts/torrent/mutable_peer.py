@@ -145,7 +145,7 @@ class MutablePeer:
                             int_pieces = np.array(bool_pieces, dtype=int)
                             pieces.append(int_pieces)
 
-                        r_bar = np.sum(pieces, axis=0)
+                        r_bar = np.sum(np.sum(pieces, axis=0))/M
                         R = 1 - p**r_bar
                         eval_string = f"Eval report for handle {handle.info_hash()} \n Throughput \n\t alltime up/down {up_all_time}:{down_all_time} \n\t payload up/down {up_payload_rate}:{down_payload_rate} \n Sequentiality \n\t {sequentiality} -> {U}/{M} \n Robustness \n\t {R}"
                         logging.info(eval_string)
