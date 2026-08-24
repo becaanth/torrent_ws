@@ -122,29 +122,35 @@ class MutablePeer:
             for handle in self.t_ses.get_torrents():
                 s = handle.status()
 
-                # throughput
-                up_all_time = s.all_time_upload
-                down_all_time = s.all_time_download
-                up_payload_rate = s.upload_payload_rate
-                down_payload_rate = s.download_payload_rate
+                try:
+                    # throughput
+                    up_all_time = s.all_time_upload
+                    down_all_time = s.all_time_download
+                    up_payload_rate = s.upload_payload_rate
+                    down_payload_rate = s.download_payload_rate
 
-                # sequentiality
-                downloaded_mask = list(s.pieces)
-                sequentiality, U, M = eval_seq(downloaded_mask)
+                    # sequentiality
+                    downloaded_mask = list(s.pieces)
+                    sequentiality, U, M = eval_seq(downloaded_mask)
 
-                # robustness
-                peer_info = handle.get_peer_info()
-                R = 0
-                if len(peer_info) != 0:
-                    logging.info(f"peer_info {peer_info}") 
-                    for peer in peer_info:
-                        pieces = peer.pieces
-                        logging.info(f"peer pieces {pieces}")
-                        r_bar = np.sum(pieces)/M
-                        R = 1 - 0.5**r_bar # p = 0.5, arbitrary, per paper
+                    # robustness
+                    peer_info = handle.get_peer_info()
+                    R = 0
+                    p = 0.5 # arbitrary, per paper
+                    pieces = []
+                    if len(peer_info) != 0:
+                        logging.info(f"peer_info {peer_info}") 
+                        for peer in peer_info:
+                            bool_pieces = peer.pieces
+                            int_pieces = np.array(bool_pieces, dtype=int)
+                            pieces.append(int_pieces)
 
-                eval_string = f"Eval report for handle {handle.info_hash()} \n Throughput \n\t alltime up/down {up_all_time}:{down_all_time} \n\t payload up/down {up_payload_rate}:{down_payload_rate} \n Sequentiality \n\t {sequentiality} -> {U}/{M} \n Robustness \n\t {R}"
-                logging.info(eval_string)
+                        r_bar = np.sum(pieces, axis=0)
+                        R = 1 - p**r_bar
+                        eval_string = f"Eval report for handle {handle.info_hash()} \n Throughput \n\t alltime up/down {up_all_time}:{down_all_time} \n\t payload up/down {up_payload_rate}:{down_payload_rate} \n Sequentiality \n\t {sequentiality} -> {U}/{M} \n Robustness \n\t {R}"
+                        logging.info(eval_string)
+                except:
+                    logging.info("Eval report is not ready ")
 
     def _flush_queue(self):
         """
