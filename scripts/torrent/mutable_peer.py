@@ -5,6 +5,7 @@ import zenoh
 from queue import Queue
 from collections import deque
 import os
+import csv
 import argparse
 
 from .torrent_utils import *
@@ -69,8 +70,24 @@ class MutablePeer:
         self.on_torrent_updated = on_torrent_updated # STALE! spawn MutableSeeder 
         self.on_metadata_received = on_metadata_received   # pass to Reconstitutor
 
+        self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_{self.policy.__name__}.csv"
+        self._init_metrics_csv()
+
         # etc
         self.poll_hz = poll_hz
+
+    def _init_metrics_csv(self):
+            """Create CSV file and write headers if it doesn't exist."""
+            if not os.path.exists(self.metrics_csv):
+                with open(self.metrics_csv, mode='w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([
+                        'timestamp', 'info_hash', 'robot_id',
+                        'up_all_time', 'down_all_time', 
+                        'up_payload_rate', 'down_payload_rate',
+                        'sequentiality', 'useful_pieces', 'total_pieces',
+                        'robustness'
+                    ])
 
     def run(self):
         """
@@ -118,6 +135,7 @@ class MutablePeer:
                 logging.debug(f"peer event: {alert}")
 
     def _eval_trs(self):
+        timestamp = time.time()
         with self.t_lock:
             for handle in self.t_ses.get_torrents():
                 s = handle.status()
@@ -152,6 +170,16 @@ class MutablePeer:
                     f" Robustness: {R:.4f} (r_bar={r_bar:.2f})"
                     )                        
                     logging.info(eval_string)
+
+                    with open(self.metrics_csv, mode='a', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow([
+                            timestamp, str(handle.info_hash()), self.robot_id,
+                            up_all_time, down_all_time,
+                            up_payload_rate, down_payload_rate,
+                            sequentiality, U, M,
+                            R
+                        ])
                 except:
                     logging.info("Eval report is not ready ")
 
