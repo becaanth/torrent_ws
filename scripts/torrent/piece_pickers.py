@@ -89,3 +89,25 @@ def get_policy(arg : str):
         return sequence_random
     else:
         return rarest_random # default
+
+def eval_seq(downloaded_mask):
+    """
+    return sequentiality metric defined by Fan et al.
+    S = (U_0 + U_1 + ... + U_N)/M,
+    where U_i denotes a 'useful' chunk, that is in-order,
+    M denotes the total number of chunks
+
+    downloaded_mask: list<bool>
+    """
+    M = len(downloaded_mask)
+    U = 0
+
+    l = len(downloaded_mask)
+    if l < 1: # guard
+        return -1,-1,-1
+    
+    for i in range(l):
+        if downloaded_mask[i]:
+            U+=1
+        else:
+            return U/M, U, M

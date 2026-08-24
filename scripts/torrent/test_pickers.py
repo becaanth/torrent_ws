@@ -27,14 +27,14 @@ def download(arr, mask):
 
     return arr, mask
 
-# policies = ['sequential', 'random-rarest', 'hybrid', 'sequence-random']
-policies = ['sequence-random']
+policies = ['sequential', 'random-rarest', 'hybrid', 'sequence-random']
+# policies = ['sequence-random']
 
 if __name__ == "__main__":
     for pol in policies:
         policy = get_policy(pol)
         print(f"pol : {policy.__name__}")
-        n = 35 # number of pieces
+        n = 100 # number of pieces
         s = 0.5 # probability for hybrid method
         b = 10 # bucket size
         priorities = np.ones(n) * 4
@@ -43,7 +43,8 @@ if __name__ == "__main__":
 
         new_priorities = priorities
         count = 0
-        # while(np.sum(mask) != len(mask)):
+
+        # download rounds
         while(count < n):
             if pol == 'hybrid':
                 new_priorities = policy(new_priorities, mask, s)
@@ -55,6 +56,8 @@ if __name__ == "__main__":
             res[count,:] = (new_priorities)
             new_priorities, mask = download(new_priorities, mask)
             count += 1
+
+
 
         print(res)
         plt.imshow(res)
