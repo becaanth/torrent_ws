@@ -136,23 +136,6 @@ class Orchestrator:
             if existing_thread is not None:
                 logging.warning(f"Stale seeder entry for robot_id {robot_id} found (thread died); respawning")
 
-            # mutable_seeder = MutableSeeder(
-            #     params=self.seeder_params,
-            #     posegraph=self.posegraph,
-            #     this_robot_id=self.robot_id,
-            #     robot_id=robot_id,
-            #     mutable_item=mutable_item,
-            #     state=self.state,
-            #     z_ses=self.z_ses,
-            #     t_ses=self.t_ses,
-            #     t_lock=self.t_lock,
-            #     my_ip=self.my_ip
-            # )
-            # self.fleet[robot_id] = mutable_seeder
-            # new_thread = threading.Thread(target=self.fleet[robot_id].run, daemon=True, name=f"SeederThread{robot_id}")
-            # self.threads[f"seed{robot_id}"] = new_thread
-            # new_thread.start()
-
     def handle_metadata_received(self, robot_id, topology):
         # topology update, pass to reconstitutor (cb from mutable_peer)
         logging.info(f"handle_metadata_received for id {robot_id}")
@@ -160,8 +143,7 @@ class Orchestrator:
         self.rec.update_topology(robot_id, topology)
 
     def handle_torrent_update(self, robot_id, mutable_item):
-        logging.info(f"handle_torrent_update for id {robot_id}")
-        # self.fleet[robot_id].update_mutable_item(mutable_item) # TODO: ANTHONY UNCOMMENT THIS
+        logging.info(f"STALE handle_torrent_update for id {robot_id}")
 
     def run(self):
         logging.info("[agent.run]")

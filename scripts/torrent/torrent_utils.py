@@ -50,18 +50,6 @@ def drain_alerts(ses, timeout=10):
             print(a)
         time.sleep(0.2)
 
-def has_new_file(directory, last_count=[0]):
-    """
-    Check if file count has increased. True if new file added
-    """
-    current_count = len(os.listdir(directory))
-    if current_count > last_count[0]:
-        last_count[0] = current_count
-        tf = True
-    else:
-        tf = False
-    return tf
-
 def is_piece_valid(input_file):
     pass
 
