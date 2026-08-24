@@ -8,12 +8,13 @@ import os
 import argparse
 
 from .torrent_utils import *
-from .piece_pickers import get_policy, ones_filter
+from .piece_pickers import get_policy, ones_filter, eval_seq
 import logging
 
 import pdb
 
 PORT = 5204
+FLEET_SIZE=16
 logger = logging.getLogger(__name__)
 
 class MutablePeer:
@@ -82,6 +83,7 @@ class MutablePeer:
                 self._process_alerts()
                 self._flush_queue()
                 self._rebroadcast_known_items()
+                self._eval_trs()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
             logging.info("\nstopped")
@@ -114,6 +116,35 @@ class MutablePeer:
             # connection/debug            
             elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
                 logging.debug(f"peer event: {alert}")
+
+    def _eval_trs(self):
+        with self.t_lock:
+            for handle in self.t_ses.get_torrents():
+                s = handle.status()
+
+                # throughput
+                up_all_time = s.all_time_upload
+                down_all_time = s.all_time_download
+                up_payload_rate = s.upload_payload_rate
+                down_payload_rate = s.download_payload_rate
+
+                # sequentiality
+                downloaded_mask = list(s.pieces)
+                sequentiality, U, M = eval_seq(downloaded_mask)
+
+                # robustness
+                peer_info = handle.get_peer_info()
+                R = 0
+                if len(peer_info) != 0:
+                    logging.info(f"peer_info {peer_info}") 
+                    for peer in peer_info:
+                        pieces = peer.pieces
+                        logging.info(f"peer pieces {pieces}")
+                        r_bar = np.sum(pieces)/M
+                        R = 1 - 0.5**r_bar # p = 0.5, arbitrary, per paper
+
+                eval_string = f"Eval report for handle {handle.info_hash()} \n Throughput \n\t alltime up/down {up_all_time}:{down_all_time} \n\t payload up/down {up_payload_rate}:{down_payload_rate} \n Sequentiality \n\t {sequentiality} -> {U}/{M} \n Robustness \n\t {R}"
+                logging.info(eval_string)
 
     def _flush_queue(self):
         """
@@ -168,7 +199,7 @@ class MutablePeer:
 
                 # orchestrator callbacks
                 if self.on_torrent_discovered is not None:
-                    self.on_torrent_discovered(robot_id, mutable_item) # -> new session, spawn MutableSeeder
+                    self.on_torrent_discovered(robot_id, mutable_item) # -> STALE new session, spawn MutableSeeder
 
             # if new infohash, remove old torrent session
             else:
@@ -220,7 +251,6 @@ class MutablePeer:
         logging.debug(f"forwarding gossip for robot_id {relay_mi['robot_id']} seq {relay_mi['seq']}")
         self.z_ses.put(f"mutable_items/{relay_mi['robot_id']}", payload)
 
-    
     def _rebroadcast_known_items(self):
         """
         periodically re-announce everything currently known
