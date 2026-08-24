@@ -197,34 +197,31 @@ class Deconstitutor:
         and call parse_fn to update decoded id arrays.
         Silently skips if the file does not exist yet or the schema isn't ready.
         """
-        # logging.info(f"ingesting {key}")
         conn = self._get_conn(key)
         if conn is None:
             return
         try:
             new_rows = _read_new_rows(conn, self._last_rowid[key])
         except Exception as e:
-            logging.warning(f"{key}: reconnecting ({e})")
-            try:
-                self._conns[key].close()
-            except Exception:
-                pass
-            self._conns[key] = None
+            # ... handling ...
             return
         if new_rows.empty:
             return
 
         self._last_rowid[key] = int(new_rows['rowid'].max())
 
-        # Append to accumulated DataFrame
+        # Run parsing first to filter rows if parse_fn returns a modified DF
+        if parse_fn is not None:
+            parsed_rows = parse_fn(new_rows)
+            if parsed_rows is not None:
+                new_rows = parsed_rows
+
+        # Append filtered rows to accumulated DataFrame
         if self._df[key].empty:
             self._df[key] = new_rows
         else:
             self._df[key] = pd.concat([self._df[key], new_rows], ignore_index=True)
-
-        if parse_fn is not None:
-            parse_fn(new_rows)
-
+            
     # ------------------------------------------------------------------
     # Internal — id array updaters (mirrors get_db3_elements decoding)
     # ------------------------------------------------------------------
@@ -235,12 +232,18 @@ class Deconstitutor:
             self._vertex_ids = np.append(self._vertex_ids, np.uint64(msg.id))
 
     def _parse_edges(self, new_rows: pd.DataFrame):
+        valid_mask = []
         for _, row in new_rows.iterrows():
             msg = deserialize_message(row.data, get_message(row.topic_type))
-            if msg.mode.mode == 1:  # manual/teach mode only
+            is_manual = (msg.mode.mode == 1)
+            valid_mask.append(is_manual)
+            
+            if is_manual:
                 self._from_ids = np.append(self._from_ids, np.uint64(msg._from_id))
                 self._to_ids   = np.append(self._to_ids,   np.uint64(msg._to_id))
 
+        return new_rows[valid_mask]
+    
     def _parse_pointmap(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
             msg = deserialize_message(row.data, get_message(row.topic_type))
