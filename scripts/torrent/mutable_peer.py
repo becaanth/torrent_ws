@@ -124,8 +124,11 @@ class MutablePeer:
             # piece/file completed
             elif isinstance(alert, lt.file_completed_alert):
                 handle = alert.handle  # Direct handle reference!
-                file_idx = alert.index # The file/piece index that completed
-                logging.info(f"file {file_idx} completed on torrent: {handle.info_hash()}")
+                try:
+                    file_idx = alert.index # The file/piece index that completed
+                    logging.info(f"file {file_idx} completed on torrent: {handle.info_hash()}")
+                except:
+                    logging.info(f"file_idx alert corrupted")
             
                 # Directly execute your policy update on that specific handle
                 self._on_file_completed(handle)
