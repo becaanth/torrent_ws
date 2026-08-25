@@ -244,22 +244,31 @@ class MutablePeer:
             # if new infohash, remove old torrent session
             else:
                 saved_mi = self.mutable_items[robot_id]
+                old_seq = saved_mi.get('seq', -1)
+                new_seq = mutable_item['seq']
+
+                if new_seq <= old_seq:
+                    logging.debug(f"robot_id {robot_id}: new seq {new_seq} not greater than "
+                       f"stored seq {old_seq}, skipping handle swap")
+                    continue
+
+
                 logging.debug(f"overwrite \n\t {mutable_to_string(mutable_item)}")
                 self.mutable_items[robot_id] = mutable_item
 
                 # enforce robots authority on local sessions
-                if self.on_torrent_updated is not None and mutable_item['robot_id']!=self.robot_id:
+                if self.on_torrent_updated is not None:
                     self.on_torrent_updated(robot_id, mutable_item)
 
                 # remove old torrent
                 old_handle = self.torrent_handles.get(robot_id)
+                new_hash = bytes(mutable_item['infohash'])
 
                 if old_handle is not None and old_handle.is_valid():
                     old_hash = bytes(old_handle.info_hash().to_bytes())
-                    new_hash = bytes(mutable_item['infohash'])
 
                     if old_hash == new_hash:
-                        # infohash has not changes
+                        # infohash has not changed
                         continue
 
                     logging.debug(f"infohash updated for robot_id {robot_id}, replacing handle")
@@ -267,6 +276,16 @@ class MutablePeer:
                     old_handle.pause()
                     with self.t_lock:
                         self.t_ses.remove_torrent(old_handle)
+                    self.torrent_handles.pop(robot_id, None)
+
+                elif old_handle is not None:
+                    logging.warning(f"stale/invalid handle for robot_id {robot_id}; "
+                         f"removing defensively before replacing")
+                    try:
+                        with self.t_lock:
+                            self.t_ses.remove_torrent(old_handle)
+                    except Exception as e:
+                        logging.debug(f"remove_torrent on invalid handle failed (may already be gone): {e}")
                     self.torrent_handles.pop(robot_id, None)
                     
                 with self.t_lock:
