@@ -115,10 +115,10 @@ class Deconstitutor:
         # Connections opened lazily once each file's directory is created by VTR3
         self._conns: dict[str, sqlite3.Connection | None] = {k: None for k in self._db_relpaths}
 
-        # --- per-source row cursors (last rowid seen) ------------------------
+        # last rowid seen
         self._last_rowid = {k: 0 for k in self._db_relpaths}
 
-        # --- accumulated state across polls ----------------------------------
+        # accumulated state across polls
         self._df: dict[str, pd.DataFrame] = {k: pd.DataFrame() for k in self._db_relpaths}
 
         # Decoded id arrays (mirrors deconstruct_posegraph.py)
@@ -136,10 +136,6 @@ class Deconstitutor:
         self._index_df: pd.DataFrame | None = None
 
         logging.info(f"initialized with IP {self.input_dir} OP: {self.output_dir}")
-
-    # ------------------------------------------------------------------
-    # Public
-    # ------------------------------------------------------------------
 
     def _get_conn(self, key: str) -> sqlite3.Connection | None:
         """Return an open connection for key, opening it lazily if the file exists."""
@@ -162,10 +158,6 @@ class Deconstitutor:
             logging.info("\nstopped.")
         finally:
             self._close()
-
-    # ------------------------------------------------------------------
-    # Internal — polling
-    # ------------------------------------------------------------------
 
     def _poll(self):
         """Read new rows from all sources, then write any new chunks."""
@@ -203,7 +195,7 @@ class Deconstitutor:
         try:
             new_rows = _read_new_rows(conn, self._last_rowid[key])
         except Exception as e:
-            # ... handling ...
+            logging.info(f"_ingest_new_rows exception {e}")
             return
         if new_rows.empty:
             return
@@ -221,28 +213,18 @@ class Deconstitutor:
             self._df[key] = new_rows
         else:
             self._df[key] = pd.concat([self._df[key], new_rows], ignore_index=True)
-            
-    # ------------------------------------------------------------------
-    # Internal — id array updaters (mirrors get_db3_elements decoding)
-    # ------------------------------------------------------------------
 
+    # parse functions for each datatype
     def _parse_vertices(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
             msg = deserialize_message(row.data, get_message(row.topic_type))
             self._vertex_ids = np.append(self._vertex_ids, np.uint64(msg.id))
 
     def _parse_edges(self, new_rows: pd.DataFrame):
-        valid_mask = []
         for _, row in new_rows.iterrows():
             msg = deserialize_message(row.data, get_message(row.topic_type))
-            is_manual = (msg.mode.mode == 1)
-            valid_mask.append(is_manual)
-            
-            if is_manual:
-                self._from_ids = np.append(self._from_ids, np.uint64(msg._from_id))
-                self._to_ids   = np.append(self._to_ids,   np.uint64(msg._to_id))
-
-        return new_rows[valid_mask]
+            self._from_ids = np.append(self._from_ids, np.uint64(msg._from_id))
+            self._to_ids   = np.append(self._to_ids,   np.uint64(msg._to_id))
     
     def _parse_pointmap(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
@@ -255,23 +237,17 @@ class Deconstitutor:
             self._this_vids = np.append(self._this_vids, np.uint64(msg.this_vid))
             self._map_vids  = np.append(self._map_vids,  np.uint64(msg.map_vid))
 
-    # ------------------------------------------------------------------
-    # Internal — chunk writing
-    # ------------------------------------------------------------------
-
     def _write_new_chunks(self, robot_id):
         """
         For each submap not yet written, check if we have enough data
         to write its chunk and write it if so.
         """
-        # logging.info(f"writing new chunks")
-
         for i, sid in enumerate(self._submap_ids):
             if i in self._written_chunks:
                 continue
 
-            # only touch finalized submaps (2 submap buffer)
-            if not (i < len(self._submap_ids) - 2):
+            # only touch finalized submaps (1 submap buffer)
+            if i >= len(self._submap_ids) - 1:
                 continue
 
             sid = int(sid)
@@ -290,6 +266,7 @@ class Deconstitutor:
 
             # actual vertex IDs belonging to this submap
             relevant_vids = self._this_vids[ptr_row_idxs]
+            logger.info(f"relevant_vids {relevant_vids}")
 
             # pointmap row — single row at position i in accumulated df
             if i >= len(self._df['pointmap']):
@@ -317,11 +294,20 @@ class Deconstitutor:
             chunk_vtxs = self._df['vertices'].iloc[valid_vtx[sort_vidx]]
 
             # edges whose from_id is in relevant_vids
+            # edges can be empty for the last submap — allow it
             e_mask      = np.isin(self._from_ids, relevant_vids)
             valid_edges = np.where(e_mask)[0]
             sort_eidx   = np.argsort(self._from_ids[e_mask])
             chunk_edges = self._df['edges'].iloc[valid_edges[sort_eidx]]
-            # edges can be empty for the last submap — allow it
+
+            # if chunk_edges are not manual, continue
+            logger.info(f"chunk_edges {chunk_edges}")
+            if len(chunk_edges) > 0:
+                temp_edge = inspect_ros_data(chunk_edges.iloc[0])
+                if temp_edge.mode.mode != 1: # 1 is manual
+                    logger.info(f"skipping non-manual piece")
+                    self._written_chunks.add(i)
+                    continue    
 
             # --- write chunk ------------------------------------------------
             db_path = os.path.join(self.output_dir, f"{str(hex(int(sid)))[2:].zfill(16)}.db3")
