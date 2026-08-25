@@ -99,15 +99,15 @@ def eval_seq(downloaded_mask):
 
     downloaded_mask: list<bool>
     """
-    M = len(downloaded_mask)
+    M = np.sum(downloaded_mask)
     U = 0
 
     l = len(downloaded_mask)
     if l < 1: # guard
         return -1,-1,-1
     
-    for i in range(l):
+    for i in range(M):
         if downloaded_mask[i]:
             U+=1
         else:
-            return U/M, U, M
+            return U/M, U, M, l

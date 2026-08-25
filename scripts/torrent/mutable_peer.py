@@ -85,7 +85,7 @@ class MutablePeer:
                         'timestamp', 'info_hash', 'robot_id',
                         'up_all_time', 'down_all_time', 
                         'up_payload_rate', 'down_payload_rate',
-                        'sequentiality', 'useful_pieces', 'total_pieces',
+                        'sequentiality', 'useful_pieces', 'this_robots_pieces', 'total_pieces'
                         'robustness'
                     ])
 
@@ -152,7 +152,7 @@ class MutablePeer:
 
                     # sequentiality
                     downloaded_mask = list(s.pieces)
-                    sequentiality, U, M = eval_seq(downloaded_mask)
+                    sequentiality, U, M, l = eval_seq(downloaded_mask)
 
                     # robustness
                     peer_info = handle.get_peer_info()
@@ -180,7 +180,7 @@ class MutablePeer:
                             timestamp, str(handle.info_hash()), self.robot_id,
                             up_all_time, down_all_time,
                             up_payload_rate, down_payload_rate,
-                            sequentiality, U, M,
+                            sequentiality, U, M, l, 
                             R
                         ])
                 except:
