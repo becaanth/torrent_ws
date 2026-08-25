@@ -132,7 +132,7 @@ class Reconstitutor:
 
     def _poll(self):
         """
-        Read new deconstructed data, metadata
+        Read new deconsituted data, metadata
         """
         if self.topology:
             for r_id, topo in self.topology.items():
@@ -229,7 +229,7 @@ class Reconstitutor:
                     logging.info(target_piece)
                     self.db_written.append(db_file)
                 except Exception as e:
-                    logging.debug(f"WARNING {db_file} because {e}")
+                    logging.warning(f"{db_file} because {e}")
                     traceback.print_exc()
                     continue
 
@@ -370,7 +370,7 @@ class Reconstitutor:
         data is NULL until the real piece arrives.
         """
         s = time.time()
-        rowids = {'vertices':[], 'edges':[]}
+        rowids = {'vertices':{}, 'edges':{}}
         # populate ROS2 messages with topology information    
         with self._open('vertices') as conn:
             conn.execute("BEGIN;")
@@ -381,7 +381,7 @@ class Reconstitutor:
                         INSERT INTO messages (topic_id, timestamp, data)
                         VALUES (?, ?, ?)
                     """, (self._last_rowid['vertices'], -1, s_v)) # timestamp is -1 default
-                rowids['vertices'].append(cur.lastrowid)
+                rowids['vertices'][v.vertex_id] = cur.lastrowid
 
             conn.execute("COMMIT;")
             
@@ -399,7 +399,7 @@ class Reconstitutor:
                     INSERT INTO messages (topic_id, timestamp, data)
                     VALUES (?, ?, ?)
                 """, (self._last_rowid['edges'], -1, s_e)) # timestamp is -1 default
-                rowids['edges'].append(cur.lastrowid)
+                rowids['edges'][(e.from_id,e.to_id)] = cur.lastrowid
             
             conn.execute("COMMIT;")
 
@@ -430,8 +430,8 @@ class Reconstitutor:
             with self._open(k) as conn:
                 conn.execute("BEGIN;")
                 if k in skeleton_keys:
-                    rowids = piece.skeleton_rowids.get(k)
-                    if not rowids or len(rowids) != len(df):
+                    rowid_map = piece.skeleton_rowids.get(k, {})
+                    if not rowid_map or len(rowid_map) != len(df):
                         # dynamically insert rows instead of calling ROLLBACK and ignoring it.
                         conn.executemany("""
                             INSERT INTO messages (topic_id, timestamp, data)
@@ -441,13 +441,19 @@ class Reconstitutor:
                             for _, row in df.iterrows()
                         ])
                     else:
-                        conn.executemany("""
-                            UPDATE messages SET data = ?, timestamp = ?
-                            WHERE id = ?
-                            """, [
-                                (row['data'], int(row['timestamp']), rowid) 
-                                for rowid, (_, row) in zip(rowids, df.iterrows())
-                            ])
+                        updates = []
+                        for _, row in df.iterrows():
+                            logging.info(f"row {row}")
+                            ros_row = inspect_ros_data(row)
+                            if k == 'vertices':
+                                rid = rowid_map.get(int(ros_row.id))
+                            elif k == 'edges':
+                                rid = rowid_map.get((int(ros_row.from_id), int(ros_row.to_id)))
+                            if rid is None:
+                                logging.warning(f"no skeleton rowid for vertex {rid}, falling back to insert")
+                                continue
+                            updates.append((row['data'], int(row['timestamp']), rid))
+                        conn.executemany("UPDATE messages SET data = ?, timestamp = ? WHERE id = ?", updates)
                 else:           
                     # no skeleton exists                                  
                     conn.executemany("""
@@ -460,6 +466,7 @@ class Reconstitutor:
                 
                 conn.execute("COMMIT;")
                 logging.info(f"_write_message: {piece.top_vertices[0].vertex_id}")
+                print(f"_write_message: {piece.top_vertices[0].vertex_id}")
 
     def _write_index(self, index_msg):
         # write index.db3, containing MapInfo message
@@ -502,10 +509,11 @@ if __name__ == "__main__":
     posegraph = args.posegraph
     robot_id = os.getenv("ROBOT_ID")
 
-    output_dir = os.path.join(args.posegraph_root, f"r{posegraph}", 'graph')
+    output_dir = os.path.join(args.posegraph_root, f"{posegraph}", 'graph')
     piece_path = os.path.join(args.piece_root, args.posegraph)
 
     logging.info(f'output_dir: {output_dir}')
+    print(f'output_dir: {output_dir}')
     rec = Reconstitutor(
         pieces_path=piece_path,
         robot_id=robot_id,
