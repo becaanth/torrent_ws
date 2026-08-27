@@ -100,6 +100,7 @@ class MutablePeer:
                 self._process_alerts()
                 self._flush_queue()
                 self._rebroadcast_known_items()
+                self._reconnect_known_peers()
                 self._eval_trs()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
@@ -235,6 +236,7 @@ class MutablePeer:
 
                 # connect handle to known peers
                 for ip, p in self.peers:
+                    logging.info(f"connecting {handle.info_hash()} via {ip}")
                     handle.connect_peer((ip, p))
 
                 # orchestrator callbacks
@@ -287,7 +289,7 @@ class MutablePeer:
                     except Exception as e:
                         logging.debug(f"remove_torrent on invalid handle failed (may already be gone): {e}")
                     self.torrent_handles.pop(robot_id, None)
-                    
+
                 with self.t_lock:
                     new_handle = self.t_ses.add_torrent({
                         'info_hash': mutable_item['infohash'],
@@ -317,6 +319,19 @@ class MutablePeer:
         logging.debug(f"rebroadcasting known items")
         for robot_id, mutable_item in self.mutable_items.items():
             self._forward_gossip(mutable_item)
+
+    def _reconnect_known_peers(self):
+        """
+        periodically ensure that all known peers are connected to
+        """
+        if not self.peers or not self.torrent_handles:
+            return
+        with self.t_lock:
+            for robot_id, handle in self.torrent_handles.items():
+                if not handle.is_valid():
+                    continue
+                for ip, p in self.peers:
+                    handle.connect_peer((ip, p))
 
     def _handle_metadata_completion(self, handle):
         """
