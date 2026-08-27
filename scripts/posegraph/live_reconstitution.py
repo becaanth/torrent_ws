@@ -2,6 +2,7 @@ import sqlite3
 import pandas as pd
 import os
 import time
+import threading
 import argparse
 import logging
 
@@ -51,6 +52,7 @@ class Reconstitutor:
         # topics we are reading from
         self.tables = ['vtr_index','env_info','waypoint_name','vertices','edges','pointmap','pointmap_ptr']
         self.master_data = {table: [] for table in self.tables}
+        self._topo_lock = threading.Lock()
         self.topology = {}
 
         # topics we are writing to (+ pointmap_v0)
@@ -135,7 +137,10 @@ class Reconstitutor:
         Read new deconsituted data, metadata
         """
         if self.topology:
-            for r_id, topo in self.topology.items():
+            with self._topo_lock:
+                topo_items = list(self.topology.items())
+
+            for r_id, topo in topo_items:
                 # dont need topology for pieces this robot made
                 if str(r_id) == str(self.robot_id):
                     continue
