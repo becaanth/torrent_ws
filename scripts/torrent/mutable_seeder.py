@@ -1,8 +1,6 @@
 # seeder.py
 import libtorrent as lt
-from nacl.signing import SigningKey
 import time
-import zenoh
 import os
 import json
 import msgpack
@@ -11,8 +9,6 @@ import logging
 
 from posegraph.posegraph_utils import *
 from .torrent_utils import *
-
-import pdb
 
 # zenohd --cfg 'scouting/multicast/enabled:false'
 
@@ -24,14 +20,12 @@ class MutableSeeder:
     """
     Monitor the /pcs directory for a specific robot and seed a mutable torrent session
     This entails:
-    1) update Zenoh discovery messages and broadcast
-    2) seed the immutable snapshots
+    1) seed the immutable snapshots
     """
-    def __init__(self, params : dict, posegraph : str, this_robot_id : int, robot_id : int, state : dict, z_ses, t_ses, t_lock, my_ip, mutable_item = None, poll_hz : float = 0.05, on_torrent_updated=None):
+    def __init__(self, params : dict, posegraph : str, this_robot_id : int, robot_id : int, state : dict, t_ses, t_lock, my_ip, mutable_item = None, poll_hz : float = 0.05, on_snapshot_created=None):
         # robot params
         self.container = params['container']
         self.my_ip = my_ip
-        self.z_ses = z_ses
         logging.info("unpacked config")
         self.router = params['router']
 
@@ -53,32 +47,13 @@ class MutableSeeder:
         self.t_lock = t_lock
         self.current_handle = None
 
-        # zenoh
-        logging.info("init zenoh")
-
-        # mutable update
-        sk = SigningKey(bytes.fromhex(self.state["sk"]))
-
-        # is this robot the authority on this session?
-        if self.this_robot_id == self.robot_id:
-            self.mi = { 
-            'pubkey' : sk.verify_key.encode(),
-            'robot_id' : robot_id,
-            'seq' : self.state['seq'],
-            'infohash' : -1,
-            'my_ip' : self.my_ip
-            }
-        else:
-            self.mi = mutable_item
-            self.mi['my_ip'] = self.my_ip
-
         # etc
         self.poll_hz = poll_hz
         self.start_flag = False
         self._last_file_count = 0
 
         # inversion of control callback
-        self.on_torrent_updated = on_torrent_updated # -> update mutable item from remote
+        self.on_snapshot_created = on_snapshot_created # -> tell gossiper theres a new snapshot
         logging.info("init done")
 
 
@@ -94,8 +69,6 @@ class MutableSeeder:
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
             logging.info("\nstopped.")
-        finally:
-            self.z_ses.close()
 
     def _poll(self):
         curr_files = os.listdir(self.input_path)
@@ -124,34 +97,26 @@ class MutableSeeder:
             
             logging.info(f"snapshot created with hash {ti}")
 
-            # update mutable item if authority
-            if self.this_robot_id == self.robot_id:
-                self.mi['infohash'] = infohash.to_bytes()
-                self.mi['seq']+=1
-                logging.info(f"seeding mutable item: \n{mutable_to_string(self.mi)}")
+            if self.on_snapshot_created is not None:
+                self.on_snapshot_created(infohash.to_bytes())
                 
-        if self.start_flag:
-            # pub gossip over Zenoh
-            payload = msgpack.packb(self.mi, use_bin_type=True)
-            logging.debug(f"putting zenoh item for {self.robot_id}")
-            self.z_ses.put(f"mutable_items/{self.robot_id}", payload)     
-            with self.t_lock: 
-                for handle in self.t_ses.get_torrents():
-                    s = handle.status()
-                    logging.debug(f"[Robot Seeder Check]:")
-                    logging.debug(f"  Infohash: {handle.info_hash()}")
-                    logging.debug(f"  Is Valid: {handle.is_valid()}")
-                    logging.debug(f"  State:    {s.state}")        # Looking for 'seeding' vs 'checking_files' vs 'error'
-                    logging.debug(f"  Paused:   {s.paused}")       # Must be False
-                    logging.debug(f"  Error:    {s.errc.message()}")         # Should be 0 / None
-                    logging.debug(f"  Has Metadata: {handle.has_metadata()}")
-            
-                logging.info(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
-                for a in self.t_ses.pop_alerts():
-                    if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
-                        lt.peer_error_alert, lt.listen_failed_alert,
-                        lt.listen_succeeded_alert, lt.incoming_connection_alert)):
-                        logging.info(f"[Seeder] alert: {a}")
+        with self.t_lock: 
+            for handle in self.t_ses.get_torrents():
+                s = handle.status()
+                logging.debug(f"[Robot Seeder Check]:")
+                logging.debug(f"  Infohash: {handle.info_hash()}")
+                logging.debug(f"  Is Valid: {handle.is_valid()}")
+                logging.debug(f"  State:    {s.state}")        # Looking for 'seeding' vs 'checking_files' vs 'error'
+                logging.debug(f"  Paused:   {s.paused}")       # Must be False
+                logging.debug(f"  Error:    {s.errc.message()}")         # Should be 0 / None
+                logging.debug(f"  Has Metadata: {handle.has_metadata()}")
+        
+            logging.info(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
+            for a in self.t_ses.pop_alerts():
+                if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
+                    lt.peer_error_alert, lt.listen_failed_alert,
+                    lt.listen_succeeded_alert, lt.incoming_connection_alert)):
+                    logging.info(f"[Seeder] alert: {a}")
 
     def _has_new_file(self):
         current_count = len(os.listdir(self.input_path))
@@ -213,17 +178,11 @@ class MutableSeeder:
         self.bencoded_torrent_dict = lt.bencode(torrent_dict)
 
         return ti
-    
-    def update_mutable_item(self, mutable_item):
-        logging.debug(f"updating mutable item for robot {self.robot_id}")
-        if self.mi['seq'] < mutable_item['seq']:
-            self.mi = mutable_item
-            self.mi['my_ip'] = self.my_ip
 
 # ======================================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Mutable Seeder (LibTorrent + Zenoh)")
+    parser = argparse.ArgumentParser(description="Mutable Seeder (LibTorrent)")
     parser.add_argument('-s', '--seeder_params', type=str, default = 'seeder_params.json')
     parser.add_argument('-p', '--posegraph', required=True,help="Bag name (subdirectory under folder_path)")
     parser.add_argument('-r', '--robot_id', type=int, default = 0)

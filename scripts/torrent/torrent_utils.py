@@ -25,8 +25,6 @@ DOCKER_IPS = {
     'torrent8':'172.18.0.3',
 }
 
-Z_PORT=5203
-
 # -------------------------
 # Persistence
 # -------------------------
@@ -121,7 +119,7 @@ def on_mutable_item(sample):
 
     return mutable_item
 
-def unpack_device(params: dict, robot_id):
+def unpack_device(params: dict, robot_id, zenoh_port):
     """
     Load IPs and build explicit Zenoh listen/connect configuration.
     """
@@ -135,21 +133,21 @@ def unpack_device(params: dict, robot_id):
 
     if d == 'docker':
             my_ip = DOCKER_IPS[f"torrent{robot_id}"]
-            cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{Z_PORT}"]))
+            cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{zenoh_port}"]))
             
             # Connect to host base AND all other torrent peer container IPs
-            peer_targets = [f"tcp/{ROBOT_IPS['base']}:{Z_PORT}"]
+            peer_targets = [f"tcp/{ROBOT_IPS['base']}:{zenoh_port}"]
             for name, ip in DOCKER_IPS.items():
                 if ip != my_ip:
-                    peer_targets.append(f"tcp/{ip}:{Z_PORT}")
+                    peer_targets.append(f"tcp/{ip}:{zenoh_port}")
                     
             cfg.insert_json5("connect/endpoints", json.dumps(peer_targets))
     elif d == 'hunter':
         container = params.get('container', 'base')
         my_ip = ROBOT_IPS[container]
-        cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{Z_PORT}"]))
+        cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{zenoh_port}"]))
         peer_targets = [
-            f"tcp/{ip}:{Z_PORT}"
+            f"tcp/{ip}:{zenoh_port}"
             for name, ip in ROBOT_IPS.items()
             if ip != my_ip
         ]
@@ -157,7 +155,7 @@ def unpack_device(params: dict, robot_id):
     else:
         raise ValueError(f"[unpack_device] Invalid device parameter: {d}")
 
-    print(f"[unpack] Role: PEER | My IP: {my_ip} | Listening: tcp/0.0.0.0:{Z_PORT}")
+    print(f"[unpack] Role: PEER | My IP: {my_ip} | Listening: tcp/0.0.0.0:{zenoh_port}")
     return my_ip, cfg
 
 def verify_piece_file_alignment(info):

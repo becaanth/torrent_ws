@@ -9,7 +9,7 @@ def on_sample(sample):
     message_queue.put(sample)
 
 if __name__ == "__main__":
-    with open(f'torrent/seeder_params.json', "r") as f:
+    with open(f'torrent/peer_params.json', "r") as f:
         params = json.load(f)
 
     robot_id = 0

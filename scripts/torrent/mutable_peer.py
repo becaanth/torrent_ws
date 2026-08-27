@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 import libtorrent as lt
 import time
-import zenoh
-from queue import Queue
-from collections import deque
 import os
 import csv
 import argparse
@@ -12,25 +9,20 @@ from .torrent_utils import *
 from .piece_pickers import get_policy, ones_filter, eval_seq
 import logging
 
-import pdb
-
 PORT = 5204
 FLEET_SIZE=16
 logger = logging.getLogger(__name__)
 
 class MutablePeer:
     """
-    Listen to Zenoh gossip, join a torrent session
+    Listen to gossip and join torrent sessions
     """
-    def __init__(self, params : dict, posegraph : str, state : dict, robot_id, policy, pol_param, z_ses, t_ses, t_lock, my_ip, poll_hz : float = 0.2, 
-                 on_torrent_discovered=None, on_metadata_received=None, on_torrent_updated=None):
+    def __init__(self, params : dict, posegraph : str, state : dict, robot_id, policy, pol_param, t_ses, t_lock, poll_hz : float = 0.2, 
+                on_metadata_received=None):
         
         # robot params
         self.container = params['container']
         self.peers = []
-
-        self.my_ip = my_ip
-        self.z_ses = z_ses
 
         logging.info("unpacked config")
         self.router = params['router']
@@ -51,23 +43,13 @@ class MutablePeer:
         logging.info("init lt")
         self.t_ses = t_ses
         self.t_lock = t_lock
-
-        # zenoh
-        logging.info("init zenoh")
-
-        self.message_queue = Queue()
-        self.sub = self.z_ses.declare_subscriber("mutable_items/**", self.on_sample)
-        self.last_sample = None
         
-        # mutable updates
-        self.mutable_items = {}
-        self.torrent_handles = {}
+        # mutable updates populated from gossiper callbacks
+        self.torrent_handles = {} # robot_id -> handle
+        self.known_infohash = {}  # robot_id -> infohash bytes
         self.processed_metadata_hashes = set()  # Track infohashes we've already handled
-        self.max_seq_seen = {} 
 
         # inversion of control callbacks
-        self.on_torrent_discovered = on_torrent_discovered # STALE! spawn MutableSeeder 
-        self.on_torrent_updated = on_torrent_updated # STALE! spawn MutableSeeder 
         self.on_metadata_received = on_metadata_received   # pass to Reconstitutor
 
         self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_{self.policy.__name__}.csv"
@@ -96,17 +78,12 @@ class MutablePeer:
         logging.info(f"running the main loop (Ctrl-C to stop)")
         try:
             while True:
-                logging.debug(f"len queue = {self.message_queue.qsize()}, peers {self.peers}")
                 self._process_alerts()
-                self._flush_queue()
-                self._rebroadcast_known_items()
                 self._reconnect_known_peers()
                 self._eval_trs()
                 time.sleep(1.0 / self.poll_hz)
         except KeyboardInterrupt:
             logging.info("\nstopped")
-        finally:
-            self.z_ses.close()
 
     def _process_alerts(self):
         # Monitor existing torrents
@@ -137,6 +114,20 @@ class MutablePeer:
             # connection/debug            
             elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
                 logging.debug(f"peer event: {alert}")
+
+    def _reconnect_known_peers(self):
+        """
+        periodically ensure that all known peers are connected to
+        """
+        if not self.peers or not self.torrent_handles:
+            return
+        with self.t_lock:
+            for robot_id, handle in self.torrent_handles.items():
+                if not handle.is_valid():
+                    continue
+                for ip, p in self.peers:
+                    handle.connect_peer((ip, p))
+
 
     def _eval_trs(self):
         timestamp = time.time()
@@ -187,151 +178,75 @@ class MutablePeer:
                 except:
                     logging.info("Eval report is not ready ")
 
-    def _flush_queue(self):
+    def join_torrent(self, robot_id, infohash, peer_ip):
         """
-        flush self.message_queue
+        join a torrent notified by gossip.on_new_item
         """
-        # Check for new messages (non-blocking)
-        while not self.message_queue.empty():
-            sample = self.message_queue.get()
-            mutable_item = on_mutable_item(sample)
-            logging.info(f"mutable item received \n {mutable_to_string(mutable_item)}")
+        logging.info(f"joining torrent for robot_id {robot_id}")
+        self._remember_peer(peer_ip) # TODO: what
 
-            robot_id = mutable_item['robot_id']
-            seq = mutable_item['seq']
-
-            if robot_id == self.robot_id:
-                logging.debug(f"skipping gossip about our own robot_id {self.robot_id}")
-                continue
-
-            if mutable_item['my_ip'] == self.my_ip:
-                logging.debug(f"skipping gossip from our own seeder")
-                continue
-
-            # check for freshness
-            last_seq = self.max_seq_seen.get(robot_id, -1)
-            if seq <= last_seq:
-                logging.debug(f"ignoring stale seq {seq} for robot_id {robot_id}, have seq {last_seq}")
-                continue
-            self.max_seq_seen[robot_id] = seq
-
-            peer_endpoint = (mutable_item['my_ip'], PORT)
-            if peer_endpoint not in self.peers:
-                self.peers.append(peer_endpoint)
-                logging.debug(f"added {peer_endpoint} to fleet peer list ({len(self.peers)} known)")
-            
-            # check if new session discovered
-            existing_ids = {mi['robot_id'] for _, mi in self.mutable_items.items() if 'robot_id' in mi}
-            robot_id = mutable_item['robot_id']
-            if robot_id not in existing_ids:
-                logging.info(f"new \n{mutable_to_string(mutable_item)}")
-                self.mutable_items[robot_id] = mutable_item
-                with self.t_lock:
-                    handle = self.t_ses.add_torrent({
-                        'info_hash': mutable_item['infohash'],
-                        'save_path': self.output_path,
-                        'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
-                    })
-                self.torrent_handles[robot_id] = handle
-
-                # connect handle to known peers
-                for ip, p in self.peers:
-                    logging.info(f"connecting {handle.info_hash()} via {ip}")
-                    handle.connect_peer((ip, p))
-
-                # orchestrator callbacks
-                if self.on_torrent_discovered is not None:
-                    self.on_torrent_discovered(robot_id, mutable_item) # -> STALE new session, spawn MutableSeeder
-
-            # if new infohash, remove old torrent session
-            else:
-                saved_mi = self.mutable_items[robot_id]
-                old_seq = saved_mi.get('seq', -1)
-                new_seq = mutable_item['seq']
-
-                if new_seq <= old_seq:
-                    logging.debug(f"robot_id {robot_id}: new seq {new_seq} not greater than "
-                       f"stored seq {old_seq}, skipping handle swap")
-                    continue
-
-
-                logging.debug(f"overwrite \n\t {mutable_to_string(mutable_item)}")
-                self.mutable_items[robot_id] = mutable_item
-
-                # enforce robots authority on local sessions
-                if self.on_torrent_updated is not None:
-                    self.on_torrent_updated(robot_id, mutable_item)
-
-                # remove old torrent
-                old_handle = self.torrent_handles.get(robot_id)
-                new_hash = bytes(mutable_item['infohash'])
-
-                if old_handle is not None and old_handle.is_valid():
-                    old_hash = bytes(old_handle.info_hash().to_bytes())
-
-                    if old_hash == new_hash:
-                        # infohash has not changed
-                        continue
-
-                    logging.debug(f"infohash updated for robot_id {robot_id}, replacing handle")
-                    self.processed_metadata_hashes.discard(old_hash)
-                    old_handle.pause()
-                    with self.t_lock:
-                        self.t_ses.remove_torrent(old_handle)
-                    self.torrent_handles.pop(robot_id, None)
-
-                elif old_handle is not None:
-                    logging.warning(f"stale/invalid handle for robot_id {robot_id}; "
-                         f"removing defensively before replacing")
-                    try:
-                        with self.t_lock:
-                            self.t_ses.remove_torrent(old_handle)
-                    except Exception as e:
-                        logging.debug(f"remove_torrent on invalid handle failed (may already be gone): {e}")
-                    self.torrent_handles.pop(robot_id, None)
-
-                with self.t_lock:
-                    new_handle = self.t_ses.add_torrent({
-                        'info_hash': mutable_item['infohash'],
-                        'save_path': self.output_path,
-                        'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
-                    })
-                self.torrent_handles[robot_id] = new_handle
-
-                for ip, p in self.peers:
-                    logging.debug(f"attempting connect_peer to {(ip, p)}")
-                    new_handle.connect_peer((ip, p))
-
-    def _forward_gossip(self, mutable_item):
-        """
-        instead of spawning a new seeder, creating conflicts at the snapshot level, use libtorrent to handle multi-seeding
-        """
-        relay_mi = dict(mutable_item)
-        relay_mi['my_ip'] = self.my_ip
-        payload = msgpack.packb(relay_mi, use_bin_type=True)
-        logging.debug(f"forwarding gossip for robot_id {relay_mi['robot_id']} seq {relay_mi['seq']}")
-        self.z_ses.put(f"mutable_items/{relay_mi['robot_id']}", payload)
-
-    def _rebroadcast_known_items(self):
-        """
-        periodically re-announce everything currently known
-        """
-        logging.debug(f"rebroadcasting known items")
-        for robot_id, mutable_item in self.mutable_items.items():
-            self._forward_gossip(mutable_item)
-
-    def _reconnect_known_peers(self):
-        """
-        periodically ensure that all known peers are connected to
-        """
-        if not self.peers or not self.torrent_handles:
-            return
+        self.known_infohash[robot_id] = bytes(infohash)
         with self.t_lock:
-            for robot_id, handle in self.torrent_handles.items():
-                if not handle.is_valid():
-                    continue
-                for ip, p in self.peers:
-                    handle.connect_peer((ip, p))
+                handle = self.t_ses.add_torrent({
+                'info_hash': infohash,
+                'save_path': self.output_path,
+                'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
+            })
+        self.torrent_handles[robot_id] = handle
+ 
+        for ip, p in self.peers:
+            logging.info(f"connecting {handle.info_hash()} via {ip}")
+            handle.connect_peer((ip, p))
+
+    def update_torrent(self, robot_id, infohash, peer_ip):
+        """
+        update a torrent based on gossiper.handle_new_item cb
+        """
+        self._remember_peer(peer_ip)
+
+        old_hash = self.known_infohash.get(robot_id)
+        new_hash = bytes(infohash)
+        if old_hash == new_hash:
+            logging.debug(f"infohash unchanged for robot id {robot_id}")
+            return
+        self.known_infohash[robot_id] = new_hash
+
+        # remove old handle
+        old_handle = self.torrent_handles.get(robot_id)
+        if old_handle is not None and old_handle.is_valid():
+            logging.debug(f"infohash updated for robot_id {robot_id}, replacing handle")
+            self.processed_metadata_hashes.discard(old_hash)
+            old_handle.pause()
+            with self.t_lock:
+                self.t_ses.remove_torrent(old_handle)
+            self.torrent_handles.pop(robot_id, None)
+        elif old_handle is not None:
+            logging.warning(f"stale/invalid handle for robot_id {robot_id}; removing defensively")
+            try:
+                with self.t_lock:
+                    self.t_ses.remove_torrent(old_handle)
+            except Exception as e:
+                logging.debug(f"remove_torrent on invalid handle failed (may already be gone): {e}")
+            self.torrent_handles.pop(robot_id, None)
+
+        # add new handle
+        with self.t_lock:
+            new_handle = self.t_ses.add_torrent({
+                'info_hash': infohash,
+                'save_path': self.output_path,
+                'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
+            })
+        self.torrent_handles[robot_id] = new_handle
+ 
+        for ip, p in self.peers:
+            logging.debug(f"attempting connect_peer to {(ip, p)}")
+            new_handle.connect_peer((ip, p))
+
+    def _remember_peer(self, peer_ip):
+        peer_endpoint = (peer_ip, PORT)
+        if peer_endpoint not in self.peers:
+            self.peers.append(peer_endpoint)
+            logging.debug(f"added {peer_endpoint} to fleet peer list ({len(self.peers)} knwon)")
 
     def _handle_metadata_completion(self, handle):
         """
@@ -353,12 +268,8 @@ class MutablePeer:
         self._on_file_completed(handle)
         # find associated robot_id
         robot_id = None
-        for rid, mi in self.mutable_items.items():
-            mi_hash =  mi['infohash']
-            if isinstance(mi_hash, (bytearray, memoryview)):
-                mi_hash = bytes(mi_hash)
-
-            if mi_hash == infohash_bytes:
+        for rid, ih in self.known_infohash.items():
+            if ih == infohash_bytes:
                 robot_id = rid
                 break
         
@@ -393,19 +304,10 @@ class MutablePeer:
             logging.info(f"priorities: \n{check}")
             handle.prioritize_files(lt_priorities)
 
-    def on_sample(self, sample):
-        logging.info("Received Zenoh message")
-        
-        if sample != self.last_sample:
-            self.message_queue.put(sample)
-            self.last_sample = sample
-        else:
-            logging.debug(f"Duplicate sample received")
-
 # ======================================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Mutable Peer (LibTorrent + Zenoh)")
+    parser = argparse.ArgumentParser(description="Mutable Peer (LibTorrent)")
     parser.add_argument('-s', '--peer_params', type=str, default = 'peer_params.json')
     parser.add_argument('-p', '--posegraph', required=True,help="Bag name (subdirectory under folder_path)")
     parser.add_argument('-q', '--state_file', type=str, default = 'mutable_state.json')
