@@ -375,7 +375,7 @@ class Reconstitutor:
             for v in piece.top_vertices:
                 m_v = Vertex(id=v.vertex_id)
                 s_v = serialize_message(m_v)
-                cur = conn.execute("""writing
+                cur = conn.execute("""
                         INSERT INTO messages (topic_id, timestamp, data)
                         VALUES (?, ?, ?)
                     """, (self._last_rowid['vertices'], -1, s_v)) # timestamp is -1 default
