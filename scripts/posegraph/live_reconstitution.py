@@ -147,6 +147,7 @@ class Reconstitutor:
                     continue
                 
                 pieces, idx = inspect_torrent(topo)
+                logging.info(f"[DIAG] inspect_torrent(r_id={r_id}) -> {len(pieces)} pieces, idx_present={idx is not None}")
                 if idx is None:
                     logging.info("inspect_torrent: idx is None")
                 if not self._index_written and idx is not None: # write MapInfo (from remote)
@@ -155,18 +156,27 @@ class Reconstitutor:
 
                 for piece in pieces:
                     vid = piece.top_vertices[0].vertex_id
+                    logging.info(f"[DIAG] piece vid={hex(vid)} incoming: {len(piece.top_vertices)} verts, {len(piece.top_edges)} edges")
                     if vid not in self.pieces:
+                        logging.info(f"[DIAG] vid={hex(vid)} is NEW to self.pieces -> inserting")
                         piece.metadata_written = False
                         piece.data_ingested = False
                         self.pieces[vid] = piece
                     else: # tracked piece
                         tracked_piece = self.pieces[vid]
+                        logging.info(f"[DIAG] vid={hex(vid)} already tracked: {len(tracked_piece.top_vertices)} verts, "
+                                     f"{len(tracked_piece.top_edges)} edges, metadata_written={tracked_piece.metadata_written}, "
+                                     f"data_ingested={tracked_piece.data_ingested}")
                         new_vertex_ids = {v.vertex_id for v in tracked_piece.top_vertices}
                         added_vertices = [v for v in piece.top_vertices if v.vertex_id not in new_vertex_ids]
+                        logging.info(f"[DIAG] vid={hex(vid)} added_vertices={len(added_vertices)}")
                         if added_vertices:
                             tracked_piece.top_vertices.extend(added_vertices)
                             tracked_piece.metadata_written = False
+                            logging.info(f"[DIAG] vid={hex(vid)} -> metadata_written set False (vertex growth)")
 
+                        edge_delta = len(piece.top_edges) - len(tracked_piece.top_edges)
+                        logging.info(f"[DIAG] vid={hex(vid)} edge_delta={edge_delta}")
                         if len(piece.top_edges) > len(tracked_piece.top_edges):
                             logging.debug(f"Merging {len(piece.top_edges) - len(tracked_piece.top_edges)} cross-session edges into submap {hex(vid)}")
                             tracked_piece.top_edges = piece.top_edges
@@ -174,6 +184,8 @@ class Reconstitutor:
       
             # Write metadata skeletons for any piece not yet written
             for vid, piece in self.pieces.items():
+                logging.info(f"[DIAG] scan-for-write vid={hex(vid)} metadata_written={getattr(piece, 'metadata_written', False)} "
+                             f"data_ingested={piece.data_ingested}")
                 if not getattr(piece, 'metadata_written', False):  # empty dict = not yet written
                     logging.info(f"writing metadata for piece {vid}")
                     self._write_metadata(piece)
@@ -415,6 +427,7 @@ class Reconstitutor:
             
             conn.execute("COMMIT;")
 
+        logging.info(f"[DIAG] _write_metadata wrote {len(new_vertices)} new verts, {len(new_edges)} new edges for vid={hex(piece.top_vertices[0].vertex_id)}")
         piece.metadata_written = True
         logging.info(f"_write_metadata: {piece.top_vertices[0].vertex_id}")
 
