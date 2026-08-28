@@ -25,20 +25,16 @@ DOCKER_IPS = {
     'torrent8':'172.18.0.3',
 }
 
-# -------------------------
-# Persistence
-# -------------------------
-def load_state(state_file):
+def load_state(state_file): # TODO
     if os.path.exists(state_file):
         with open(state_file, "r") as f:
             return json.load(f)
     print(f"[load_state] couldn't load state")
     return None
 
-def save_state(state, state_file):
+def save_state(state, state_file): # TODO
     with open(state_file, "w") as f:
         json.dump(state, f)
-
 
 def drain_alerts(ses, timeout=10):
     print('drain alerts')
@@ -47,9 +43,6 @@ def drain_alerts(ses, timeout=10):
         for a in ses.pop_alerts():
             print(a)
         time.sleep(0.2)
-
-def is_piece_valid(input_file):
-    pass
 
 def sqlite_file_filter(file_path: str) -> bool:
     """
@@ -66,7 +59,7 @@ def sqlite_file_filter(file_path: str) -> bool:
     return True
 
 def mutable_to_string(mutable_item):
-    return f"\tkey: {mutable_item['pubkey']}\n \trobot id: {mutable_item['robot_id']} \n \tseq: {mutable_item['seq']} \n \tinfohash: {mutable_item['infohash']} \n \tmy IP: {mutable_item['my_ip']}"
+    return f"robot id: {mutable_item['robot_id']}, seq: {mutable_item['seq']}, infohash: {mutable_item['infohash']}, my IP: {mutable_item['my_ip']}"
 
 # inspection
 def inspect_torrent(encoded_info):
@@ -130,7 +123,6 @@ def unpack_device(params: dict, robot_id, zenoh_port):
     cfg.insert_json5("connect/exit_on_failure", "false")
     cfg.insert_json5("connect/timeout_ms", "-1")
 
-
     if d == 'docker':
             my_ip = DOCKER_IPS[f"torrent{robot_id}"]
             cfg.insert_json5("listen/endpoints", json.dumps([f"tcp/0.0.0.0:{zenoh_port}"]))
@@ -157,49 +149,3 @@ def unpack_device(params: dict, robot_id, zenoh_port):
 
     print(f"[unpack] Role: PEER | My IP: {my_ip} | Listening: tcp/0.0.0.0:{zenoh_port}")
     return my_ip, cfg
-
-def verify_piece_file_alignment(info):
-    """
-    Verify that every non-pad file starts and ends exactly on a piece boundary,
-    i.e. piece i <-> file i is a valid 1:1 mapping.
-    """
-    files = info.files()
-    piece_length = info.piece_length()
-    num_pieces = info.num_pieces()
-
-    real_file_indices = []
-    for i in range(files.num_files()):
-        if files.file_flags(i) & files.flag_pad_file:
-            continue  # skip pad files
-        real_file_indices.append(i)
-
-        offset = files.file_offset(i)
-        size = files.file_size(i)
-
-        if offset % piece_length != 0:
-            raise AssertionError(
-                f"file {i} ({files.file_name(i)}) starts at byte {offset}, "
-                f"not aligned to piece boundary ({piece_length})"
-            )
-        if size > piece_length:
-            raise AssertionError(
-                f"file {i} ({files.file_name(i)}) size {size} exceeds piece_length "
-                f"{piece_length}; not 1:1 with a single piece"
-            )
-        # end boundary is implicitly fine if offset is aligned and size <= piece_length,
-        # since padding fills the rest of that piece
-
-    if len(real_file_indices) != num_pieces:
-        # padding could make this equal even with extra pad files,
-        # but a mismatch here means something is off
-        print(
-            f"num real files ({len(real_file_indices)}) != num_pieces ({num_pieces}); "
-            f"1:1 mapping assumption may not hold"
-        )
-
-    return real_file_indices
-
-def progress_bar(prio):
-    arr = np.array(prio)
-    result = "".join(arr.astype(str))
-    return result
