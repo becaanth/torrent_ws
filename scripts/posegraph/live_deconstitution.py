@@ -301,7 +301,6 @@ class Deconstitutor:
             chunk_edges = self._df['edges'].iloc[valid_edges[sort_eidx]]
 
             # if chunk_edges are not manual, continue
-            logger.info(f"chunk_edges {chunk_edges}")
             if len(chunk_edges) > 0:
                 temp_edge = inspect_ros_data(chunk_edges.iloc[0])
                 if temp_edge.mode.mode != 1: # 1 is manual
