@@ -277,6 +277,7 @@ class MutablePeer:
         
         if robot_id is None:
             return
+        logging.info(f"_handle_metadata_completion: robot_id is {robot_id}")
 
         metadata = info.metadata()
 
