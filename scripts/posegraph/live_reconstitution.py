@@ -115,7 +115,7 @@ class Reconstitutor:
             self._close()
 
     def update_topology(self, robot_id, topology):
-        logging.info(f"updating topology for robot {robot_id}")
+        logging.info(f"updating topology for robot {robot_id} : topology hash {hash(topology)}")
         with self._topo_lock:
             self.topology[str(robot_id)] = topology
 
@@ -138,6 +138,8 @@ class Reconstitutor:
         if self.topology:
             with self._topo_lock:
                 topo_items = list(self.topology.items())
+                logging.debug(f"_poll hash of self.topology: {hash(self.topology)}")
+
 
             for r_id, topo in topo_items:
                 # dont need topology for pieces this robot made
