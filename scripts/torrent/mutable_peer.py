@@ -285,7 +285,9 @@ class MutablePeer:
         if metadata and self.on_metadata_received:
             logging.info(f"poll_metadata updated for robot {robot_id}")
             self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
-            self.processed_metadata_hashes.add(infohash_bytes)               
+            self.processed_metadata_hashes.add(infohash_bytes)     
+        else:
+            logging.info(f"metadata is None")
 
     def _on_file_completed(self, handle):
         """

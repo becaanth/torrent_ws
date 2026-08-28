@@ -429,6 +429,7 @@ class Reconstitutor:
             
             with self._open(k) as conn:
                 conn.execute("BEGIN;")
+                logging.info(f"opening {k}")                            
                 if k in skeleton_keys:
                     rowid_map = piece.skeleton_rowids.get(k, {})
                     if not rowid_map or len(rowid_map) != len(df):
@@ -455,8 +456,6 @@ class Reconstitutor:
                             updates.append((row['data'], int(row['timestamp']), rid))
                         conn.executemany("UPDATE messages SET data = ?, timestamp = ? WHERE id = ?", updates)
                 else:           
-                    # no skeleton exists      
-                    logging.info(f"missing skeleton for piece {piece}")                            
                     conn.executemany("""
                         INSERT INTO messages (topic_id, timestamp, data)
                         VALUES (?, ?, ?)
