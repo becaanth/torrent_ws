@@ -138,11 +138,11 @@ class Reconstitutor:
         if self.topology:
             with self._topo_lock:
                 topo_items = list(self.topology.items())
-                logging.debug(f"_poll hash of self.topology: {hash(self.topology)}")
-
+                # logging.debug(f"_poll hash of self.topology: {hash(self.topology)}")
 
             for r_id, topo in topo_items:
                 # dont need topology for pieces this robot made
+                logging.debug(f"_poll hash of self.topology r_id {r_id}: {hash(topo)}")
                 if str(r_id) == str(self.robot_id):
                     continue
                 
