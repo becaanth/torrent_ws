@@ -161,6 +161,12 @@ class Reconstitutor:
                         self.pieces[vid] = piece
                     else: # tracked piece
                         tracked_piece = self.pieces[vid]
+                        new_vertex_ids = {v.vertex_id for v in tracked_piece.top_vertices}
+                        added_vertices = [v for v in piece.top_vertices if v.vertex_id not in new_vertex_ids]
+                        if added_vertices:
+                            tracked_piece.top_vertices.extend(added_vertices)
+                            tracked_piece.metadata_written = False
+
                         if len(piece.top_edges) > len(tracked_piece.top_edges):
                             logging.debug(f"Merging {len(piece.top_edges) - len(tracked_piece.top_edges)} cross-session edges into submap {hex(vid)}")
                             tracked_piece.top_edges = piece.top_edges
