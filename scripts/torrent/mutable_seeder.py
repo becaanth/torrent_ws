@@ -22,7 +22,7 @@ class MutableSeeder:
     This entails:
     1) seed the immutable snapshots
     """
-    def __init__(self, params : dict, posegraph : str, this_robot_id : int, robot_id : int, state : dict, t_ses, t_lock, my_ip, mutable_item = None, poll_hz : float = 0.05, on_snapshot_created=None):
+    def __init__(self, params : dict, posegraph : str, this_robot_id : int, robot_id : int, state : dict, t_ses, t_lock, my_ip, mutable_item = None, poll_hz : float = 0.1, on_snapshot_created=None):
         # robot params
         self.container = params['container']
         self.my_ip = my_ip

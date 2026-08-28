@@ -183,7 +183,7 @@ class MutablePeer:
         join a torrent notified by gossip.on_new_item
         """
         logging.info(f"joining torrent for robot_id {robot_id}")
-        self._remember_peer(peer_ip) # TODO: what
+        self._remember_peer(peer_ip)
 
         self.known_infohash[robot_id] = bytes(infohash)
         with self.t_lock:
@@ -253,6 +253,7 @@ class MutablePeer:
         callback for metadata alerts. process metadata and send to reconstitutor
         """
         # get torrent info (metadata)
+        logging.info(f'_handle_metadata_completion')
         info = handle.get_torrent_info()
         infohash_bytes = bytes(info.info_hash().to_bytes())
                 
@@ -262,6 +263,7 @@ class MutablePeer:
         logging.info(f'num_pieces {num_pieces}, num_files {num_files}')
         
         if infohash_bytes in self.processed_metadata_hashes:
+            logging.info(f"infohash_bytes {infohash_bytes} in self.processed_metadata_hashes; return")
             return
 
         # update priorities imediately
