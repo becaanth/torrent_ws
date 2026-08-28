@@ -116,7 +116,8 @@ class Reconstitutor:
 
     def update_topology(self, robot_id, topology):
         logging.info(f"updating topology for robot {robot_id}")
-        self.topology[str(robot_id)] = topology
+        with self._topo_lock:
+            self.topology[str(robot_id)] = topology
 
     @contextlib.contextmanager
     def _open(self, key):
@@ -368,11 +369,15 @@ class Reconstitutor:
         data is NULL until the real piece arrives.
         """
         logging.info(f"_write_metadata for piece {piece}")
-        rowids = {'vertices':{}, 'edges':{}}
-        # populate ROS2 messages with topology information    
+        if not piece.skeleton_rowids:
+            piece.skeleton_rowids = {'vertices': {}, 'edges': {}}
+        rowids = piece.skeleton_rowids
+
+        new_vertices = [v for v in piece.top_vertices if v.vertex_id not in rowids['vertices']]
+        # populate .db3 with topology information    
         with self._open('vertices') as conn:
             conn.execute("BEGIN;")
-            for v in piece.top_vertices:
+            for v in new_vertices:
                 m_v = Vertex(id=v.vertex_id)
                 s_v = serialize_message(m_v)
                 cur = conn.execute("""
@@ -382,10 +387,11 @@ class Reconstitutor:
                 rowids['vertices'][v.vertex_id] = cur.lastrowid
 
             conn.execute("COMMIT;")
-            
+
+        new_edges = [e for e in piece.top_edges if (e.from_id, e.to_id) not in rowids['edges']]  
         with self._open('edges') as conn:
             conn.execute("BEGIN;")
-            for e in piece.top_edges:
+            for e in new_edges:
                 tf = LieGroupTransform(xi = e.xi, cov_set=False)
                 edge_mode = EdgeMode()
                 edge_mode.mode = EdgeMode.UNKNOWN
@@ -401,7 +407,6 @@ class Reconstitutor:
             
             conn.execute("COMMIT;")
 
-        piece.skeleton_rowids = rowids
         piece.metadata_written = True
         logging.info(f"_write_metadata: {piece.top_vertices[0].vertex_id}")
 
