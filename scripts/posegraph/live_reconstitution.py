@@ -103,7 +103,6 @@ class Reconstitutor:
         # list pieces that have been previewed, but not written
         self.pieces : dict[int, Piece] = {}
 
-    # ============= PUBLIC =================
     def run(self):
         logging.info(f"polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
         try:
@@ -119,7 +118,6 @@ class Reconstitutor:
         logging.info(f"updating topology for robot {robot_id}")
         self.topology[str(robot_id)] = topology
 
-    # ============= PRIVATE ================
     @contextlib.contextmanager
     def _open(self, key):
         """Short-lived connection, guaranteed to close even on error."""
@@ -146,6 +144,8 @@ class Reconstitutor:
                     continue
                 
                 pieces, idx = inspect_torrent(topo)
+                if idx is None:
+                    logging.info("inspect_torrent: idx is None")
                 if not self._index_written and idx is not None: # write MapInfo (from remote)
                     self._write_index(idx)
                     self._index_written = True    
@@ -166,13 +166,12 @@ class Reconstitutor:
             # Write metadata skeletons for any piece not yet written
             for vid, piece in self.pieces.items():
                 if not getattr(piece, 'metadata_written', False):  # empty dict = not yet written
-                    # time.sleep(0.01) # ANTHONY - delay for dev
+                    logging.info(f"writing metadata for piece {vid}")
                     self._write_metadata(piece)
 
         # go through local chunks
         if not os.path.exists(self.pieces_path):
             return
-        
 
         robot_subfolders = [f.path for f in os.scandir(self.pieces_path) if f.is_dir()]
         for robot_subfolder in robot_subfolders:
@@ -320,12 +319,6 @@ class Reconstitutor:
         for k, path in self._db_relpaths.items():
             os.makedirs(os.path.dirname(path), exist_ok=True)
 
-            # if os.path.exists(path):
-            #     os.remove(path)
-            # for sidecar in (path + "-wal", path + "-shm"):
-            #     if os.path.exists(sidecar):
-            #         os.remove(sidecar)
-
             # reconnect to fresh file
             with self._open(k) as conn:
                 logging.info(f'init db {k} at {self._conns[k]}, topic {self.topics[k]}')
@@ -374,7 +367,7 @@ class Reconstitutor:
         Write skeleton rows for vertices and edges using topology from top_vertices/top_edges.
         data is NULL until the real piece arrives.
         """
-        s = time.time()
+        logging.info(f"_write_metadata for piece {piece}")
         rowids = {'vertices':{}, 'edges':{}}
         # populate ROS2 messages with topology information    
         with self._open('vertices') as conn:
@@ -382,7 +375,7 @@ class Reconstitutor:
             for v in piece.top_vertices:
                 m_v = Vertex(id=v.vertex_id)
                 s_v = serialize_message(m_v)
-                cur = conn.execute("""
+                cur = conn.execute("""writing
                         INSERT INTO messages (topic_id, timestamp, data)
                         VALUES (?, ?, ?)
                     """, (self._last_rowid['vertices'], -1, s_v)) # timestamp is -1 default
@@ -416,6 +409,8 @@ class Reconstitutor:
         """
         Connect to existing conns and write messages
         """
+        logging.info(f"_write_message for piece {piece}")
+
         field_map = {
             'index':       'vtr_index',
             'pointmap_v0': 'pointmap',
@@ -460,7 +455,8 @@ class Reconstitutor:
                             updates.append((row['data'], int(row['timestamp']), rid))
                         conn.executemany("UPDATE messages SET data = ?, timestamp = ? WHERE id = ?", updates)
                 else:           
-                    # no skeleton exists                                  
+                    # no skeleton exists      
+                    logging.info(f"missing skeleton for piece {piece}")                            
                     conn.executemany("""
                         INSERT INTO messages (topic_id, timestamp, data)
                         VALUES (?, ?, ?)
@@ -503,9 +499,8 @@ class Reconstitutor:
         # nothing to flush, each write closes its own connections
         logging.info("connections closed.")
 
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description = 'Script to deconstruct posegraphs submap-wise')
+    parser = argparse.ArgumentParser(description = 'Script to reconstitute posegraphs submap-wise')
     parser.add_argument('-p', '--posegraph', default='none', help="The name of the posegraph") 
     parser.add_argument('--poll_hz', type=float, default=1.0)
     parser.add_argument('--posegraph_root', default='/home/asrl/ASRL/vtr3/temp/pgs')
