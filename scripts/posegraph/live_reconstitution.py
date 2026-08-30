@@ -458,38 +458,40 @@ class Reconstitutor:
                 logging.info(f"opening {k}")                            
                 if k in skeleton_keys:
                     rowid_map = piece.skeleton_rowids.get(k, {})
-                    if not rowid_map or len(rowid_map) != len(df):
-                        # dynamically insert rows instead of calling ROLLBACK and ignoring it.
-                        conn.executemany("""
-                            INSERT INTO messages (topic_id, timestamp, data)
-                            VALUES (?, ?, ?)
-                            """, [
-                            (self._last_rowid[k], int(row['timestamp']), row['data'])
-                            for _, row in df.iterrows()
-                        ])
-                    else:
-                        updates = []
-                        for _, row in df.iterrows():
-                            logging.info(f"row {row}")
-                            ros_row = inspect_ros_data(row)
-                            if k == 'vertices':
-                                rid = rowid_map.get(int(ros_row.id))
-                            elif k == 'edges':
-                                rid = rowid_map.get((int(ros_row.from_id), int(ros_row.to_id)))
-                            if rid is None:
-                                logging.warning(f"no skeleton rowid for vertex {rid}, falling back to insert")
-                                continue
-                            updates.append((row['data'], int(row['timestamp']), rid))
+                    if k not in piece.skeleton_rowids:
+                        piece.skeleton_rowids[k] = rowid_map
+
+                    updates = []
+                    for _, row in df.iterrows():
+                        ros_row = inspect_ros_data(row)
+
+                        # determine the key
+                        if k == 'vertices':
+                            map_key = int(ros_row.id)
+                        elif k == 'edges':
+                            map_key = (int(ros_row.from_id), int(ros_row.to_id))
+
+                        rid = rowid_map.get(map_key)
+
+                        if rid is None:
+                            # if no skeleton id exists, insert dynamically
+                            cur = conn.execute("""
+                                INSERT INTO messages (topic_id, timestamp, data)
+                                VALUES (?, ?, ?)
+                                """, [
+                                (self._last_rowid[k], int(row['timestamp']), row['data'])
+                                for _, row in df.iterrows()
+                            ])
+                            # track the new row ID
+                            rowid_map[map_key] = cur.lastrowid
+                        else:
+                            # if the skeleton row exists, queue it to overwrite topology
+                            updates.append((row['data'], int(row['timestamp']), rid))  
+
+                    # Apply all updates to existing skeleton rows
+                    if updates:
                         conn.executemany("UPDATE messages SET data = ?, timestamp = ? WHERE id = ?", updates)
-                else:           
-                    conn.executemany("""
-                        INSERT INTO messages (topic_id, timestamp, data)
-                        VALUES (?, ?, ?)
-                    """,  [
-                        (self._last_rowid[k], int(row['timestamp']), row['data'])
-                        for _, row in df.iterrows()
-                    ])
-                
+
                 conn.execute("COMMIT;")
                 logging.info(f"_write_message: {piece.top_vertices[0].vertex_id}")
                 print(f"_write_message: {piece.top_vertices[0].vertex_id}")
