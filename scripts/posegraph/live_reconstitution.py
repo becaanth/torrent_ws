@@ -5,6 +5,7 @@ import time
 import threading
 import argparse
 import logging
+import bisect # to search the skeleton
 
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
@@ -171,17 +172,20 @@ class Reconstitutor:
                         added_vertices = [v for v in piece.top_vertices if v.vertex_id not in new_vertex_ids]
                         logging.info(f"[DIAG] vid={hex(vid)} added_vertices={len(added_vertices)}")
                         if added_vertices:
-                            tracked_piece.top_vertices.extend(added_vertices)
+                            for v in added_vertices:
+                                ids = [tv.vertex_id for tv in tracked_piece.top_vertices]
+                                idx = bisect.bisect_left(ids, v.vertex_id)
+                                tracked_piece.top_vertices.insert(idx, v)
                             tracked_piece.metadata_written = False
                             logging.info(f"[DIAG] vid={hex(vid)} -> metadata_written set False (vertex growth)")
 
-                        edge_delta = len(piece.top_edges) - len(tracked_piece.top_edges)
-                        logging.info(f"[DIAG] vid={hex(vid)} edge_delta={edge_delta}")
-                        if len(piece.top_edges) > len(tracked_piece.top_edges):
-                            logging.debug(f"Merging {len(piece.top_edges) - len(tracked_piece.top_edges)} cross-session edges into submap {hex(vid)}")
-                            tracked_piece.top_edges = piece.top_edges
+                        existing_edge_ids = {(e.from_id, e.to_id) for e in tracked_piece.top_edges}
+                        added_edges = [e for e in piece.top_edges if (e.from_id, e.to_id) not in existing_edge_ids]
+                        logging.info(f"[DIAG] vid={hex(vid)} added_edges={len(added_edges)}")
+                        if added_edges:
+                            tracked_piece.top_edges.extend(added_edges)
                             tracked_piece.metadata_written = False
-      
+
             # Write metadata skeletons for any piece not yet written
             for vid, piece in self.pieces.items():
                 logging.info(f"[DIAG] scan-for-write vid={hex(vid)} metadata_written={getattr(piece, 'metadata_written', False)} "
@@ -458,39 +462,47 @@ class Reconstitutor:
                 logging.info(f"opening {k}")                            
                 if k in skeleton_keys:
                     rowid_map = piece.skeleton_rowids.get(k, {})
-                    if k not in piece.skeleton_rowids:
-                        piece.skeleton_rowids[k] = rowid_map
-
                     updates = []
+                    inserts = []
+
                     for _, row in df.iterrows():
                         ros_row = inspect_ros_data(row)
-
                         # determine the key
                         if k == 'vertices':
-                            map_key = int(ros_row.id)
+                            row_key = int(ros_row.id)
                         elif k == 'edges':
-                            map_key = (int(ros_row.from_id), int(ros_row.to_id))
-
-                        rid = rowid_map.get(map_key)
-
+                            row_key = (int(ros_row.from_id), int(ros_row.to_id))
+                        rid = rowid_map.get(row_key)
                         if rid is None:
-                            # if no skeleton id exists, insert dynamically
-                            cur = conn.execute("""
-                                INSERT INTO messages (topic_id, timestamp, data)
-                                VALUES (?, ?, ?)
-                                """, [
-                                (self._last_rowid[k], int(row['timestamp']), row['data'])
-                                for _, row in df.iterrows()
-                            ])
-                            # track the new row ID
-                            rowid_map[map_key] = cur.lastrowid
-                        else:
-                            # if the skeleton row exists, queue it to overwrite topology
-                            updates.append((row['data'], int(row['timestamp']), rid))  
+                            logging.warning(
+                                f"no skeleton rowid for {k} key={row_key} in this piece "
+                                f"(vid={hex(piece.top_vertices[0].vertex_id)}) -- inserting fresh row "
+                                f"instead of dropping data"
+                            )
+                            inserts.append((row['data'], int(row['timestamp']), rid))  
+                            continue
+                        updates.append((row['data'], int(row['timestamp']), rid))  
 
                     # Apply all updates to existing skeleton rows
                     if updates:
                         conn.executemany("UPDATE messages SET data = ?, timestamp = ? WHERE id = ?", updates)
+
+                    if inserts:
+                        for row_key, timestamp, data in inserts:
+                            cur = conn.execute("""
+                                INSERT INTO messages (topic_id, timestamp, data)
+                                VALUES (?, ?, ?)
+                            """, (self._last_rowid[k], timestamp, data))
+                            rowid_map[row_key] = cur.lastrowid
+
+                else:
+                    conn.executemany("""
+                        INSERT INTO messages (topic_id, timestamp, data)
+                        VALUES (?, ?, ?)
+                    """,  [
+                        (self._last_rowid[k], int(row['timestamp']), row['data'])
+                        for _, row in df.iterrows()
+                    ])
 
                 conn.execute("COMMIT;")
                 logging.info(f"_write_message: {piece.top_vertices[0].vertex_id}")
