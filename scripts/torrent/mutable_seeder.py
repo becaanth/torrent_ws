@@ -170,6 +170,8 @@ class MutableSeeder:
                 file_entry[b"x-edges"] = msgpack.packb(
                     [edge_to_dict(e) for e in edges], use_bin_type=True
                 )
+                logging.info(f"torrent_dict vertices {[vertex_to_dict(v) for v in vertices]}")
+                logging.info(f"torrent_dict edges {[edge_to_dict(e) for e in edges]}")
             except Exception as e:
                 logging.error(f"snapshot ERROR parsing chunk {filename}: {e}. Skipping annotations for this file.")
                 continue
