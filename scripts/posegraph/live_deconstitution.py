@@ -132,6 +132,9 @@ class Deconstitutor:
         # Which submap indices have already been written as output chunks
         self._written_chunks: set[int] = set()
 
+        # track local submaps
+        self._local_submaps_positions: list[int] = []
+
         # index df read lazily on first successful connection
         self._index_df: pd.DataFrame | None = None
 
@@ -179,7 +182,7 @@ class Deconstitutor:
         self._ingest_new_rows('env_info',      None)
 
         if self._index_df is not None and not self._index_df.empty:
-            self._write_new_chunks(self.robot_id)
+            self._write_new_chunks()
         # else:
         #     logging.warning("Delaying chunk writing, waiting for valid index structure.")
 
@@ -229,7 +232,11 @@ class Deconstitutor:
     def _parse_pointmap(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
             msg = deserialize_message(row.data, get_message(row.topic_type))
-            self._submap_ids = np.append(self._submap_ids, np.uint64(msg.vertex_id))
+            sid = np.uint64(msg.vertex_id)
+            self._submap_ids = np.append(self._submap_ids, sid)
+            idx = len(self._submap_ids) - 1
+            if extract_robot_id(int(sid)) == self.robot_id:
+                self._local_submaps_positions.append(idx)
 
     def _parse_pointmap_ptr(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
@@ -237,27 +244,26 @@ class Deconstitutor:
             self._this_vids = np.append(self._this_vids, np.uint64(msg.this_vid))
             self._map_vids  = np.append(self._map_vids,  np.uint64(msg.map_vid))
 
-    def _write_new_chunks(self, robot_id):
+    def _write_new_chunks(self):
         """
         For each submap not yet written, check if we have enough data
         to write its chunk and write it if so.
         """
-        for i, sid in enumerate(self._submap_ids):
+        if not self._local_submaps_positions:
+            return
+
+        # dont touch the in progress piece
+        last_local_idx = self._local_submaps_positions[-1]
+
+        for i in self._local_submaps_positions:
             if i in self._written_chunks:
                 continue
 
             # only touch finalized submaps (1 submap buffer)
-            if i >= len(self._submap_ids) - 1:
+            if i == last_local_idx:
                 continue
 
-            sid = int(sid)
-
-            # only write chunks originated by this robot; other pieces will have come from torrent
-            originator_id = extract_robot_id(sid)
-            logging.info(f"this robot {self.robot_id}, originator {originator_id}")
-            if (originator_id != robot_id):
-                self._written_chunks.add(i)
-                continue
+            sid = int(self._submap_ids[i])
 
             # Rows in pointmap_ptr that belong to this submap
             ptr_row_idxs = np.where(self._map_vids == sid)[0]
@@ -302,8 +308,8 @@ class Deconstitutor:
 
             # if chunk_edges are not manual, continue
             if len(chunk_edges) > 0:
-                temp_edge = inspect_ros_data(chunk_edges.iloc[0])
-                if temp_edge.mode.mode != 1: # 1 is manual
+                edge_modes = [inspect_ros_data(e).mode.mode for _,e in chunk_edges.iterrows()]
+                if any(mode != 1 for mode in edge_modes):
                     logger.info(f"skipping non-manual piece")
                     self._written_chunks.add(i)
                     continue    
