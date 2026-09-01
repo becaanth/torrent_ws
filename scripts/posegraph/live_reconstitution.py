@@ -170,6 +170,7 @@ class Reconstitutor:
                         piece.metadata_written = False
                         piece.data_ingested = False
                         self.pieces[vid] = piece
+                        logging.info(f"piece vid: {vid}: top_edges{piece.top_edges}")
                     # this a tracked piece
                     else:
                        continue
