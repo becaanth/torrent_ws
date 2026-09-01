@@ -52,7 +52,6 @@ class Reconstitutor:
 
         # topics we are reading from
         self.tables = ['vtr_index','env_info','waypoint_name','vertices','edges','pointmap','pointmap_ptr']
-        self.master_data = {table: [] for table in self.tables}
         self._topo_lock = threading.Lock()
         self.topology = {}
 
@@ -138,70 +137,56 @@ class Reconstitutor:
 
     def _poll(self):
         """
-        Read new deconsituted data, metadata
+        Read new deconstituted data, metadata
         """
+        # look at metadata (via torrent callback from peer)
         if self.topology:
             with self._topo_lock:
                 topo_items = list(self.topology.items())
-                # logging.debug(f"_poll hash of self.topology: {hash(self.topology)}")
 
             for r_id, topo in topo_items:
                 # dont need topology for pieces this robot made
                 logging.debug(f"_poll hash of self.topology r_id {r_id}: {hash(topo)}")
+                # if local pieces; ignore
                 if str(r_id) == str(self.robot_id):
                     continue
-                
+
+                # decode topology from binary
                 pieces, idx = inspect_torrent(topo)
                 logging.info(f"[DIAG] inspect_torrent(r_id={r_id}) -> {len(pieces)} pieces, idx_present={idx is not None}")
+
+                # if we havent written index before, write index
                 if idx is None:
                     logging.info("inspect_torrent: idx is None")
                 if not self._index_written and idx is not None: # write MapInfo (from remote)
                     self._write_index(idx)
                     self._index_written = True    
 
+                # iterate through all of the pieces
                 for piece in pieces:
-                    vid = piece.top_vertices[0].vertex_id
-                    logging.info(f"[DIAG] piece vid={hex(vid)} incoming: {len(piece.top_vertices)} verts, {len(piece.top_edges)} edges")
+                    vid = piece.top_vertices[0].vertex_id # TODO: first vid is not a unique identifier
+                    # is this a new piece
                     if vid not in self.pieces:
-                        logging.info(f"[DIAG] vid={hex(vid)} is NEW to self.pieces -> inserting")
                         piece.metadata_written = False
                         piece.data_ingested = False
                         self.pieces[vid] = piece
-                    else: # tracked piece
-                        tracked_piece = self.pieces[vid]
-                        logging.info(f"[DIAG] vid={hex(vid)} already tracked: {len(tracked_piece.top_vertices)} verts, "
-                                     f"{len(tracked_piece.top_edges)} edges, metadata_written={tracked_piece.metadata_written}, "
-                                     f"data_ingested={tracked_piece.data_ingested}")
-                        new_vertex_ids = {v.vertex_id for v in tracked_piece.top_vertices}
-                        added_vertices = [v for v in piece.top_vertices if v.vertex_id not in new_vertex_ids]
-                        logging.info(f"[DIAG] vid={hex(vid)} added_vertices={len(added_vertices)}")
-                        if added_vertices:
-                            for v in added_vertices:
-                                ids = [tv.vertex_id for tv in tracked_piece.top_vertices]
-                                idx = bisect.bisect_left(ids, v.vertex_id)
-                                tracked_piece.top_vertices.insert(idx, v)
-                            tracked_piece.metadata_written = False
-                            logging.info(f"[DIAG] vid={hex(vid)} -> metadata_written set False (vertex growth)")
-
-                        existing_edge_ids = {(e.from_id, e.to_id) for e in tracked_piece.top_edges}
-                        added_edges = [e for e in piece.top_edges if (e.from_id, e.to_id) not in existing_edge_ids]
-                        logging.info(f"[DIAG] vid={hex(vid)} added_edges={len(added_edges)}")
-                        if added_edges:
-                            tracked_piece.top_edges.extend(added_edges)
-                            tracked_piece.metadata_written = False
+                    # this a tracked piece
+                    else:
+                       continue
 
             # Write metadata skeletons for any piece not yet written
+            logging.info(f"self.pieces {self.pieces.keys()}")
             for vid, piece in self.pieces.items():
-                logging.info(f"[DIAG] scan-for-write vid={hex(vid)} metadata_written={getattr(piece, 'metadata_written', False)} "
-                             f"data_ingested={piece.data_ingested}")
                 if not getattr(piece, 'metadata_written', False):  # empty dict = not yet written
-                    logging.info(f"writing metadata for piece {vid}")
                     self._write_metadata(piece)
 
-        # go through local chunks
+        # look at pieces on disk (in pcs), to overwrite skeleton
+        # go through local pieces
         if not os.path.exists(self.pieces_path):
+            logging.critical('self.pieces_path does not exist')
             return
 
+        # get folders of pieces (N for N robots)
         robot_subfolders = [f.path for f in os.scandir(self.pieces_path) if f.is_dir()]
         for robot_subfolder in robot_subfolders:
             folder_name = os.path.basename(robot_subfolder)
