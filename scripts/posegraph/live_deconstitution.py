@@ -326,6 +326,9 @@ class Deconstitutor:
             _drop_rowid(chunk_submap_ptrs).to_sql('pointmap_ptr', conn, if_exists='replace', index=False)
             conn.close()
 
+            for _, e in chunk_edges.iterrows():
+                logging.info(f"chunk_edges {inspect_ros_data(e)}")
+
             pad_file_to_exact_size(db_path, PIECE_SIZE)
             self._written_chunks.add(i)
             logging.debug(f"finalized chunk {str(hex(int(sid)))[2:].zfill(16)}.db3")
