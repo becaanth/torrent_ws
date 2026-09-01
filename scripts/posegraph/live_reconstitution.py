@@ -176,8 +176,10 @@ class Reconstitutor:
                         added_vertices = [v for v in piece.top_vertices if v.vertex_id not in new_vertex_ids]
                         logging.info(f"[DIAG] vid={hex(vid)} added_vertices={len(added_vertices)}")
                         if added_vertices:
-                            tracked_piece.top_vertices.extend(added_vertices)
-                            tracked_piece.top_vertices.sort(key=lambda v: v.vertex_id)
+                            for v in added_vertices:
+                                ids = [tv.vertex_id for tv in tracked_piece.top_vertices]
+                                idx = bisect.bisect_left(ids, v.vertex_id)
+                                tracked_piece.top_vertices.insert(idx, v)
                             tracked_piece.metadata_written = False
                             logging.info(f"[DIAG] vid={hex(vid)} -> metadata_written set False (vertex growth)")
 
@@ -465,6 +467,7 @@ class Reconstitutor:
                 if k in skeleton_keys:
                     rowid_map = self.global_skeleton_rowids[k]
                     updates = []
+                    inserts = []
 
                     for _, row in df.iterrows():
                         ros_row = inspect_ros_data(row)
@@ -473,7 +476,6 @@ class Reconstitutor:
                             row_key = int(ros_row.id)
                         elif k == 'edges':
                             row_key = (int(ros_row.from_id), int(ros_row.to_id))
-
                         rid = rowid_map.get(row_key)
                         if rid is None:
                             logging.warning(
@@ -481,18 +483,30 @@ class Reconstitutor:
                                 f"(vid={hex(piece.top_vertices[0].vertex_id)}) -- inserting fresh row "
                                 f"instead of dropping data"
                             )
-                            cur = conn.execute("""
-                                INSERT INTO messages (topic_id, timestamp, data)
-                                VALUES (?, ?, ?)
-                            """, (self._last_rowid[k], int(row['timestamp']), row['data']))
-                            rowid_map[row_key] = cur.lastrowid
-                        else:
-                            updates.append((row['data'], int(row['timestamp']), rid))  
+                            inserts.append((row['data'], int(row['timestamp']), rid))  
+                            continue
+                        updates.append((row['data'], int(row['timestamp']), rid))  
 
                     # Apply all updates to existing skeleton rows
                     if updates:
                         conn.executemany("UPDATE messages SET data = ?, timestamp = ? WHERE id = ?", updates)
 
+                    if inserts:
+                        for row_key, timestamp, data in inserts:
+                            cur = conn.execute("""
+                                INSERT INTO messages (topic_id, timestamp, data)
+                                VALUES (?, ?, ?)
+                            """, (self._last_rowid[k], timestamp, data))
+                            rowid_map[row_key] = cur.lastrowid
+
+                else:
+                    conn.executemany("""
+                        INSERT INTO messages (topic_id, timestamp, data)
+                        VALUES (?, ?, ?)
+                    """,  [
+                        (self._last_rowid[k], int(row['timestamp']), row['data'])
+                        for _, row in df.iterrows()
+                    ])
 
                 conn.execute("COMMIT;")
                 logging.info(f"_write_message: {piece.top_vertices[0].vertex_id}")
