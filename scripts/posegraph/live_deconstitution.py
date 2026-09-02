@@ -311,16 +311,16 @@ class Deconstitutor:
                 
                 merges_to_remote = False
                 # Only inspect edges connected to this local submap
-                for fid, tid in zip(self._from_ids[e_mask], self._to_ids[e_mask]):
-                    if (extract_robot_id(int(fid)) != self.robot_id) or \
-                    (extract_robot_id(int(tid)) != self.robot_id):
-                        merges_to_remote = True
-                        break
+                # for fid, tid in zip(self._from_ids[e_mask], self._to_ids[e_mask]):
+                #     if (extract_robot_id(int(fid)) != self.robot_id) or \
+                #     (extract_robot_id(int(tid)) != self.robot_id):
+                #         merges_to_remote = True
+                #         break
                         
                 if not merges_to_remote:
                     logging.info("skipping, no merges to remote")
                     continue
-                
+
             # if chunk_edges are not manual, continue
             if len(chunk_edges) > 0:
                 edge_modes = [inspect_ros_data(e).mode.mode for _,e in chunk_edges.iterrows()]
