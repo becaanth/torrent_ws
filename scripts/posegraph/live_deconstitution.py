@@ -259,10 +259,6 @@ class Deconstitutor:
             if i in self._written_chunks:
                 continue
 
-            # only touch finalized submaps (1 submap buffer)
-            if i == last_local_idx:
-                continue
-
             sid = int(self._submap_ids[i])
 
             # Rows in pointmap_ptr that belong to this submap
@@ -307,6 +303,16 @@ class Deconstitutor:
             valid_edges = np.where(e_mask)[0]
             sort_eidx   = np.argsort(self._from_ids[e_mask])
             chunk_edges = self._df['edges'].iloc[valid_edges[sort_eidx]]
+
+            if i == last_local_idx:
+                # If this is the last submap, AND it is a merge
+                remote_to_ids = self._to_ids[from_mask]
+                merges_to_remote = any(
+                    extract_robot_id(int(tid)) != self.robot_id
+                    for tid in remote_to_ids
+                )
+                if not merges_to_remote:
+                    continue
 
             # if chunk_edges are not manual, continue
             if len(chunk_edges) > 0:
