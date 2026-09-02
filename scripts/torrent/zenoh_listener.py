@@ -1,5 +1,6 @@
 import zenoh
-from torrent_utils import *
+import json
+from torrent_utils import inspect_torrent, unpack_device, mutable_to_string, on_mutable_item
 from queue import Queue
 
 message_queue = Queue()
@@ -14,7 +15,7 @@ if __name__ == "__main__":
 
     robot_id = 0
     container = params['container']
-    my_ip, z_cfg = unpack_device(params, robot_id)
+    my_ip, z_cfg = unpack_device(params, robot_id, 5203)
     z_cfg.insert_json5("mode", '"client"')
     z_ses = zenoh.open(z_cfg)
     sub = z_ses.declare_subscriber("mutable_items/**", on_sample)

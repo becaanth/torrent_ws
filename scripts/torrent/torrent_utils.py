@@ -66,7 +66,7 @@ def inspect_torrent(encoded_info):
     info = lt.bdecode(encoded_info)
     
     pieces : list[Piece] = []
-    # guard MapIfno
+    # guard MapInfo
     try:
         idx = msgpack.unpackb(info[b'files'][0][b'x-idx'], raw=False)
     except:

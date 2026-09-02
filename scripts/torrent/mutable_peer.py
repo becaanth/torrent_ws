@@ -283,7 +283,7 @@ class MutablePeer:
 
         # orchestrator callback
         if metadata and self.on_metadata_received:
-            logging.info(f"poll_metadata updated for robot {robot_id}")
+            logging.info(f"poll_metadata updated for robot {robot_id}, {type(metadata)} | {dir(metadata)}")
             self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
             self.processed_metadata_hashes.add(infohash_bytes)     
         else:
