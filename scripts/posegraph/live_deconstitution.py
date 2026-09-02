@@ -305,18 +305,22 @@ class Deconstitutor:
             chunk_edges = self._df['edges'].iloc[valid_edges[sort_eidx]]
 
             if i == last_local_idx:
-                # If this is the last submap, AND it is a merge
+                # If this is the last submap, evaluate if it constitutes a merge
                 logging.info("this is the last submap")
-                logging.info(f"{[inspect_ros_data(e) for _,e in chunk_edges.iterrows()]}")
+                logging.info(f"{[inspect_ros_data(e) for _, e in chunk_edges.iterrows()]}")
                 
-                merges_to_remote = any(
-                    extract_robot_id(int(tid)) != self.robot_id
-                    for tid in self._from_ids[not(e_mask)]
-                )
+                merges_to_remote = False
+                # Only inspect edges connected to this local submap
+                for fid, tid in zip(self._from_ids[e_mask], self._to_ids[e_mask]):
+                    if (extract_robot_id(int(fid)) != self.robot_id) or \
+                    (extract_robot_id(int(tid)) != self.robot_id):
+                        merges_to_remote = True
+                        break
+                        
                 if not merges_to_remote:
-                    logging.info(f"skipping, no merges to remote")
+                    logging.info("skipping, no merges to remote")
                     continue
-
+                
             # if chunk_edges are not manual, continue
             if len(chunk_edges) > 0:
                 edge_modes = [inspect_ros_data(e).mode.mode for _,e in chunk_edges.iterrows()]
