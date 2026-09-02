@@ -307,6 +307,7 @@ class Deconstitutor:
             if i == last_local_idx:
                 # If this is the last submap, AND it is a merge
                 logging.info("this is the last submap")
+                logging.info(f"{[inspect_ros_data(e) for _,e in chunk_edges.iterrows()]}")
                 remote_from_ids = self._from_ids[to_mask]
                 merges_to_remote = any(
                     extract_robot_id(int(tid)) != self.robot_id
@@ -318,7 +319,6 @@ class Deconstitutor:
 
             # if chunk_edges are not manual, continue
             if len(chunk_edges) > 0:
-                logging.info(f"{[inspect_ros_data(e) for _,e in chunk_edges.iterrows()]}")
                 edge_modes = [inspect_ros_data(e).mode.mode for _,e in chunk_edges.iterrows()]
                 if any(mode != 1 for mode in edge_modes):
                     logger.info(f"skipping non-manual piece")
@@ -343,8 +343,8 @@ class Deconstitutor:
             _drop_rowid(chunk_submap_ptrs).to_sql('pointmap_ptr', conn, if_exists='replace', index=False)
             conn.close()
 
-            for _, e in chunk_edges.iterrows():
-                logging.info(f"chunk_edges {inspect_ros_data(e)}")
+            # for _, e in chunk_edges.iterrows():
+            #     logging.info(f"chunk_edges {inspect_ros_data(e)}")
 
             pad_file_to_exact_size(db_path, PIECE_SIZE)
             self._written_chunks.add(i)
