@@ -235,7 +235,7 @@ class Deconstitutor:
             sid = np.uint64(msg.vertex_id)
             self._submap_ids = np.append(self._submap_ids, sid)
             idx = len(self._submap_ids) - 1
-            if extract_robot_id(int(sid)) == self.robot_id:
+            if extract_robot_id(int(sid)) == self.robot_id: # TODO: when branching the first vertex is NOT local
                 self._local_submaps_positions.append(idx)
 
     def _parse_pointmap_ptr(self, new_rows: pd.DataFrame):
@@ -301,7 +301,9 @@ class Deconstitutor:
 
             # edges whose from_id is in relevant_vids
             # edges can be empty for the last submap — allow it
-            e_mask      = np.isin(self._from_ids, relevant_vids)
+            from_mask = np.isin(self._from_ids, relevant_vids)
+            to_mask = np.isin(self._to_ids, relevant_vids)
+            e_mask = from_mask | to_mask
             valid_edges = np.where(e_mask)[0]
             sort_eidx   = np.argsort(self._from_ids[e_mask])
             chunk_edges = self._df['edges'].iloc[valid_edges[sort_eidx]]
