@@ -308,10 +308,10 @@ class Deconstitutor:
                 # If this is the last submap, AND it is a merge
                 logging.info("this is the last submap")
                 logging.info(f"{[inspect_ros_data(e) for _,e in chunk_edges.iterrows()]}")
-                remote_from_ids = self._from_ids[to_mask]
+                
                 merges_to_remote = any(
                     extract_robot_id(int(tid)) != self.robot_id
-                    for tid in remote_from_ids
+                    for tid in self._from_ids[not(e_mask)]
                 )
                 if not merges_to_remote:
                     logging.info(f"skipping, no merges to remote")
