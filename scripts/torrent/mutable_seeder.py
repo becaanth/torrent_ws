@@ -134,6 +134,8 @@ class MutableSeeder:
                     lt.listen_succeeded_alert, lt.incoming_connection_alert)):
                     logging.info(f"[Seeder] alert: {a}")
 
+        self.eval_trs()
+
     def _has_new_file(self):
         current_count = len(os.listdir(self.input_path))
         if current_count > self._last_file_count:
@@ -203,7 +205,6 @@ class MutableSeeder:
             if self.current_handle:
                 s = self.current_handle.status()
                 info_hash = str(self.current_handle.info_hash())
-
 
         try:
             up_all_time = s.all_time_upload
