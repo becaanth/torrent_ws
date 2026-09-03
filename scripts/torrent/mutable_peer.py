@@ -77,12 +77,21 @@ class MutablePeer:
         run the main loop
         """
         logging.info(f"running the main loop (Ctrl-C to stop)")
+        
+        sleep_duration = 1.0 / self.poll_hz     
+        last_sample_time = time.time()        
         try:
             while True:
+                # These run every tick (at poll_hz)
                 self._process_alerts()
                 self._reconnect_known_peers()
-                self._eval_trs()
-                time.sleep(1.0 / self.poll_hz)
+                
+                current_time = time.time()
+                if current_time - last_sample_time >= 1.0:
+                    self._eval_trs()
+                    last_sample_time = current_time # Reset the timer
+                
+                time.sleep(sleep_duration)
         except KeyboardInterrupt:
             logging.info("\nstopped")
 
@@ -177,8 +186,8 @@ class MutablePeer:
                     sequentiality, U, M, l, 
                     R
                 ])
-        except:
-            logging.info("Eval report is not ready ")
+        except Exception as e:
+            logging.info(f"Eval report is not ready bc {e}")
 
     def join_torrent(self, robot_id, infohash, peer_ip):
         """
@@ -285,7 +294,7 @@ class MutablePeer:
 
         # orchestrator callback
         if metadata and self.on_metadata_received:
-            logging.info(f"poll_metadata updated for robot {robot_id}, {type(metadata)} | {dir(metadata)}")
+            logging.info(f"poll_metadata updated for robot {robot_id}")
             self.on_metadata_received(robot_id, metadata) # -> topology goes to Reconstitutor
             self.processed_metadata_hashes.add(infohash_bytes)     
         else:

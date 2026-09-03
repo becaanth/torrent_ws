@@ -74,15 +74,21 @@ class MutableSeeder:
                     ])
 
     def run(self):
-        """
-        run the main loop
-        """
         logging.info(f"polling at {self.poll_hz} Hz (Ctrl-C to stop)")
+        
+        sleep_duration = 1.0 / self.poll_hz
+        last_trs_time = time.time()
         try: 
             while True:
                 logging.info(f"polling peers")
                 self._poll()
-                time.sleep(1.0 / self.poll_hz)
+                
+                # sample TRS once per second
+                current_time = time.time()
+                if current_time - last_trs_time >= 1.0:
+                    self.eval_trs()
+                    last_trs_time = current_time
+                time.sleep(sleep_duration)
         except KeyboardInterrupt:
             logging.info("\nstopped.")
 
@@ -224,8 +230,8 @@ class MutableSeeder:
                     timestamp, info_hash, self.robot_id,
                     up_all_time, up_payload_rate, total_pieces
                 ])
-        except:
-            logging.info("Eval report is not ready ")
+        except Exception as e:
+            logging.info(f"Eval report is not ready bc {e}")
 
             
 
