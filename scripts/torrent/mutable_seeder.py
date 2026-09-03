@@ -205,24 +205,26 @@ class MutableSeeder:
                 info_hash = str(self.current_handle.info_hash())
 
 
-            try:
-                up_all_time = s.all_time_upload
-                up_payload_rate = s.upload_payload_rate
-                total_pieces = len(list(s.pieces))
+        try:
+            up_all_time = s.all_time_upload
+            up_payload_rate = s.upload_payload_rate
+            total_pieces = len(list(s.pieces))
 
-                eval_string = (
-                    f"Eval report for handle {info_hash}\n"
-                    f" Throughput Up: {up_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
-                    f" Total pieces: {total_pieces}"
-                    )                        
-                logging.info(eval_string)
+            eval_string = (
+                f"Eval report for handle {info_hash}\n"
+                f" Throughput Up: {up_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
+                f" Total pieces: {total_pieces}"
+                )                        
+            logging.info(eval_string)
 
-                with open(self.metrics_csv, mode='a', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow([
-                        timestamp, info_hash, self.robot_id,
-                        up_all_time, up_payload_rate, total_pieces
-                    ])
+            with open(self.metrics_csv, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    timestamp, info_hash, self.robot_id,
+                    up_all_time, up_payload_rate, total_pieces
+                ])
+        except:
+            logging.info("Eval report is not ready ")
 
             
 

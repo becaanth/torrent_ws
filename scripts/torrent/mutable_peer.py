@@ -136,48 +136,49 @@ class MutablePeer:
             for handle in self.t_ses.get_torrents():
                 s = handle.status()
                 info_hash = str(handle.info_hash())
-                try:
-                    # throughput
-                    up_all_time = s.all_time_upload
-                    down_all_time = s.all_time_download
-                    up_payload_rate = s.upload_payload_rate
-                    down_payload_rate = s.download_payload_rate
+                peer_info = handle.get_peer_info()
 
-                    # sequentiality
-                    downloaded_mask = list(s.pieces)
-                    sequentiality, U, M, l = eval_seq(downloaded_mask)
+        try:
+            # throughput
+            up_all_time = s.all_time_upload
+            down_all_time = s.all_time_download
+            up_payload_rate = s.upload_payload_rate
+            down_payload_rate = s.download_payload_rate
 
-                    # robustness
-                    peer_info = handle.get_peer_info()
-                    R = 0
-                    p = 0.5 # arbitrary, per paper
-                    if len(peer_info) >= 0 and M > 0:
-                        logging.info(f"peer_info {peer_info}") 
-                        peer_matrices = np.array([list(peer.pieces) for peer in peer_info], dtype=int)                                            
-                        r_i = np.sum(peer_matrices, axis=0)                         
-                        r_bar = np.mean(r_i) 
-                        R = float(1.0 - (p ** r_bar))
+            # sequentiality
+            downloaded_mask = list(s.pieces)
+            sequentiality, U, M, l = eval_seq(downloaded_mask)
 
-                    eval_string = (
-                    f"Eval report for handle {handle.info_hash()}\n"
-                    f" Throughput Up: {up_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
-                    f" Throughput Down: {down_payload_rate / 1e6:.2f} MB/s (Total: {down_all_time / 1e6:.2f} MB)\n"
-                    f" Sequentiality: {sequentiality:.4f} ({U}/{M} useful pieces)\n"
-                    f" Robustness: {R:.4f} (r_bar={r_bar:.2f})"
-                    )                        
-                    logging.info(eval_string)
+            # robustness
+            R = 0
+            p = 0.5 # arbitrary, per paper
+            if len(peer_info) >= 0 and M > 0:
+                logging.info(f"peer_info {peer_info}") 
+                peer_matrices = np.array([list(peer.pieces) for peer in peer_info], dtype=int)                                            
+                r_i = np.sum(peer_matrices, axis=0)                         
+                r_bar = np.mean(r_i) 
+                R = float(1.0 - (p ** r_bar))
 
-                    with open(self.metrics_csv, mode='a', newline='') as f:
-                        writer = csv.writer(f)
-                        writer.writerow([
-                            timestamp, info_hash, self.robot_id,
-                            up_all_time, down_all_time,
-                            up_payload_rate, down_payload_rate,
-                            sequentiality, U, M, l, 
-                            R
-                        ])
-                except:
-                    logging.info("Eval report is not ready ")
+            eval_string = (
+            f"Eval report for handle {info_hash}\n"
+            f" Throughput Up: {up_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
+            f" Throughput Down: {down_payload_rate / 1e6:.2f} MB/s (Total: {down_all_time / 1e6:.2f} MB)\n"
+            f" Sequentiality: {sequentiality:.4f} ({U}/{M} useful pieces)\n"
+            f" Robustness: {R:.4f} (r_bar={r_bar:.2f})"
+            )                        
+            logging.info(eval_string)
+
+            with open(self.metrics_csv, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    timestamp, info_hash, self.robot_id,
+                    up_all_time, down_all_time,
+                    up_payload_rate, down_payload_rate,
+                    sequentiality, U, M, l, 
+                    R
+                ])
+        except:
+            logging.info("Eval report is not ready ")
 
     def join_torrent(self, robot_id, infohash, peer_ip):
         """
