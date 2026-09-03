@@ -6,6 +6,7 @@ import json
 import msgpack
 import argparse
 import logging
+import csv
 
 from posegraph.posegraph_utils import *
 from .torrent_utils import *
@@ -47,6 +48,10 @@ class MutableSeeder:
         self.t_lock = t_lock
         self.current_handle = None
 
+        # metrics
+        self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_seeder.csv"
+        self._init_metrics_csv()
+
         # etc
         self.poll_hz = poll_hz
         self.start_flag = False
@@ -56,6 +61,17 @@ class MutableSeeder:
         self.on_snapshot_created = on_snapshot_created # -> tell gossiper theres a new snapshot
         logging.info("init done")
 
+    def _init_metrics_csv(self):
+            """Create CSV file and write headers if it doesn't exist."""
+            if not os.path.exists(self.metrics_csv):
+                with open(self.metrics_csv, mode='w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([
+                        'timestamp', 'info_hash', 'robot_id',
+                        'up_all_time', 
+                        'up_payload_rate',
+                        'total_pieces'
+                    ])
 
     def run(self):
         """
@@ -180,6 +196,35 @@ class MutableSeeder:
         self.bencoded_torrent_dict = lt.bencode(torrent_dict)
 
         return ti
+
+    def eval_trs(self):
+        timestamp = time.time()
+        with self.t_lock:
+            if self.current_handle:
+                s = self.current_handle.status()
+                info_hash = str(self.current_handle.info_hash())
+
+
+            try:
+                up_all_time = s.all_time_upload
+                up_payload_rate = s.upload_payload_rate
+                total_pieces = len(list(s.pieces))
+
+                eval_string = (
+                    f"Eval report for handle {info_hash}\n"
+                    f" Throughput Up: {up_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
+                    f" Total pieces: {total_pieces}"
+                    )                        
+                logging.info(eval_string)
+
+                with open(self.metrics_csv, mode='a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([
+                        timestamp, info_hash, self.robot_id,
+                        up_all_time, up_payload_rate, total_pieces
+                    ])
+
+            
 
 # ======================================================
 

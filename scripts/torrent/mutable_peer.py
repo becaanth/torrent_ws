@@ -52,6 +52,7 @@ class MutablePeer:
         # inversion of control callbacks
         self.on_metadata_received = on_metadata_received   # pass to Reconstitutor
 
+        # metrics
         self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_{self.policy.__name__}.csv"
         self._init_metrics_csv()
 
@@ -67,7 +68,7 @@ class MutablePeer:
                         'timestamp', 'info_hash', 'robot_id',
                         'up_all_time', 'down_all_time', 
                         'up_payload_rate', 'down_payload_rate',
-                        'sequentiality', 'useful_pieces', 'this_robots_pieces', 'total_pieces'
+                        'sequentiality', 'useful_pieces', 'this_robots_pieces', 'total_pieces',
                         'robustness'
                     ])
 
@@ -134,7 +135,7 @@ class MutablePeer:
         with self.t_lock:
             for handle in self.t_ses.get_torrents():
                 s = handle.status()
-
+                info_hash = str(handle.info_hash())
                 try:
                     # throughput
                     up_all_time = s.all_time_upload
@@ -169,7 +170,7 @@ class MutablePeer:
                     with open(self.metrics_csv, mode='a', newline='') as f:
                         writer = csv.writer(f)
                         writer.writerow([
-                            timestamp, str(handle.info_hash()), self.robot_id,
+                            timestamp, info_hash, self.robot_id,
                             up_all_time, down_all_time,
                             up_payload_rate, down_payload_rate,
                             sequentiality, U, M, l, 

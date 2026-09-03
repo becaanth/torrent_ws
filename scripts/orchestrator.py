@@ -143,7 +143,6 @@ class Orchestrator:
         logging.info(f"handle_item_updated, robot id {robot_id}, seq {mutable_item['seq']}")
         self.peer.update_torrent(robot_id, mutable_item['infohash'], mutable_item['my_ip'])
 
-        
     def handle_metadata_received(self, robot_id, topology):
         # topology update, pass to reconstitutor (cb from mutable_peer)
         logging.info(f"handle_metadata_received for id {robot_id}")

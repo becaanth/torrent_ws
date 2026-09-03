@@ -310,7 +310,7 @@ class Deconstitutor:
                 logging.info(f"{[inspect_ros_data(e) for _, e in chunk_edges.iterrows()]}")
                 
                 merges_to_remote = False
-                # Only inspect edges connected to this local submap
+                # Only inspect edges connected to this local submap TODO: figure out merging
                 # for fid, tid in zip(self._from_ids[e_mask], self._to_ids[e_mask]):
                 #     if (extract_robot_id(int(fid)) != self.robot_id) or \
                 #     (extract_robot_id(int(tid)) != self.robot_id):
