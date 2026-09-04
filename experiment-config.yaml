@@ -1,0 +1,27 @@
+session_name: experiment_session
+environment:
+  POSEGRAPH: "${POSEGRAPH}"
+  METHOD: "${METHOD}"
+
+windows:
+  - window_name: experiment
+    layout: tiled
+    panes:
+      # Pane 1: System Orchestrator
+      - shell_command:
+          - python3 orchestrator.py -p $POSEGRAPH -r $METHOD
+
+      # Pane 2: Zenoh Traffic Capture (Port 5203)
+      - shell_command:
+          - mkdir -p pcaps
+          - sudo tcpdump -i eth0 -nn -w pcaps/tcp_${POSEGRAPH}_${METHOD}_zenoh_5203.pcap port 5203
+
+      # Pane 3: Torrent Traffic Capture (Port 5204)
+      - shell_command:
+          - mkdir -p pcaps
+          - sudo tcpdump -i eth0 -nn -w pcaps/tcp_${POSEGRAPH}_${METHOD}_torrent_5204.pcap port 5204
+
+      # Pane 4: Combined Capture (Ports 5203 & 5204)
+      - shell_command:
+          - mkdir -p pcaps
+          - sudo tcpdump -i eth0 -nn -w pcaps/tcp_${POSEGRAPH}_${METHOD}_combined.pcap "port 5203 or port 5204"
