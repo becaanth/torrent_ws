@@ -54,6 +54,7 @@ class MutablePeer:
 
         # metrics
         self.len_metadata = 0
+        self.len_torrent = 0
         self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_{self.policy.__name__}.csv"
         self._init_metrics_csv()
 
@@ -71,7 +72,6 @@ class MutablePeer:
                         'up_payload_rate', 'down_payload_rate',
                         'sequentiality', 'useful_pieces', 'this_robots_pieces', 'total_pieces',
                         'robustness',
-                        'len_metadata'
                     ])
 
     def run(self):
@@ -193,7 +193,6 @@ class MutablePeer:
                             up_payload_rate, down_payload_rate,
                             sequentiality, U, M, l, 
                             R,
-                            self.len_metadata
                         ])
                 except Exception as e:
                     logging.info(f"Eval report is not ready bc {e}")

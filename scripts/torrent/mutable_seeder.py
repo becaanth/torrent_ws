@@ -48,6 +48,7 @@ class MutableSeeder:
         self.t_lock = t_lock
         self.current_handle = None
         self.len_metadata = 0
+        self.len_torrent = 0
 
         # listen to T&R for most recent localized to submap
         self.current_vtx = 0
@@ -76,7 +77,7 @@ class MutableSeeder:
                         'up_all_time', 
                         'up_payload_rate',
                         'total_pieces',
-                        'len_metadata'
+                        'len_metadata', 'len_torrent'
                     ])
 
     def run(self):
@@ -219,9 +220,11 @@ class MutableSeeder:
             
         ti = lt.torrent_info(torrent_dict)
         metadata = ti.metadata()
+        self.len_torrent = fs.total_size()
         if metadata:
             self.len_metadata = len(metadata)
             logging.info(f"Metadata size: {self.len_metadata} bytes")
+            logging.info(f"Torrent size: {self.len_torrent} bytes")
 
         self.bencoded_torrent_dict = lt.bencode(torrent_dict)
 
@@ -251,7 +254,7 @@ class MutableSeeder:
                 writer.writerow([
                     timestamp, info_hash, self.robot_id,
                     up_all_time, up_payload_rate, total_pieces,
-                    self.len_metadata
+                    self.len_metadata, self.len_torrent
                 ])
         except Exception as e:
             logging.info(f"Eval report is not ready bc {e}")
