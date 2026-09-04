@@ -68,6 +68,7 @@ def filter_repeat_files(file_path: str, current_vertex_id: int) -> bool:
     try:
         hex_val = int(hex_str, 16)
     except ValueError:
+        print("ValueError")
         return False
 
     print(f"hex_val {hex_val}")
