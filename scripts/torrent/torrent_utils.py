@@ -64,11 +64,13 @@ def filter_repeat_files(file_path: str, current_vertex_id: int) -> bool:
     # get filename as hex
     base_name = os.path.basename(file_path)
     hex_str, _ = os.path.splitext(base_name)
-    print(f"hex_str {hex_str}, current_vtx {current_vertex_id}")
+    print(f"file_path {file_path}, hex_str {hex_str}, current_vtx {current_vertex_id}")
     try:
         hex_val = int(hex_str, 16)
     except ValueError:
         return False
+
+    print(f"hex_val {hex_val}")
 
     # keep the first vertex always, so there is something to torrent
     if hex_val % 2**16:
