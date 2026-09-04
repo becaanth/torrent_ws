@@ -70,13 +70,8 @@ def filter_repeat_files(file_path: str, current_vertex_id: int) -> bool:
     except ValueError:
         print("ValueError")
         return False
-
     print(f"hex_val {hex_val}")
 
-    # keep the first vertex always, so there is something to torrent
-    if hex_val % 2**16:
-        print("include file in torrent; is the first node")
-        return True
     # TODO: we only want to filter by run id, but for now, with only one run id per robot, we can just filter by magnitude
     return current_vertex_id > hex_val
 

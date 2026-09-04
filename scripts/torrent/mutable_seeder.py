@@ -97,7 +97,7 @@ class MutableSeeder:
 
     def _poll(self):
         curr_files = os.listdir(self.input_path)
-        if len(curr_files) == 0:
+        if len(curr_files) == 0 or self.current_vtx == 0: # sentinel
             return
 
         if self._has_new_file() or self.start_flag == False:
