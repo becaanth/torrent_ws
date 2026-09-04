@@ -48,6 +48,9 @@ class MutableSeeder:
         self.t_lock = t_lock
         self.current_handle = None
 
+        # listen to T&R for most recent localized to submap
+        self.current_vtx = 0
+
         # metrics
         self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_seeder.csv"
         self._init_metrics_csv()
@@ -157,7 +160,12 @@ class MutableSeeder:
         logging.info(f"snapshot input path : {self.input_path}")
         fs = lt.file_storage()
         fs.set_piece_length(PIECE_SIZE)
-        lt.add_files(fs, self.input_path, sqlite_file_filter, flags=lt.create_torrent_flags_t.optimize_alignment) # filter removes -journal, -wal extensions
+        lt.add_files(
+             fs, 
+             self.input_path, 
+             lambda path : sqlite_file_filter(path, self.current_vtx), # filter removes -journal, -wal extensions, and repeat vtxs that are ahead of the robot
+             flags=lt.create_torrent_flags_t.optimize_alignment
+        ) 
 
         t = lt.create_torrent(fs, PIECE_SIZE)        
         lt.set_piece_hashes(t, os.path.dirname(self.input_path))

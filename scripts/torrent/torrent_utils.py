@@ -44,10 +44,11 @@ def drain_alerts(ses, timeout=10):
             print(a)
         time.sleep(0.2)
 
-def sqlite_file_filter(file_path: str) -> bool:
-    """
-    Returns True if .db3, else False
-    """
+def sqlite_file_filter(file_path: str, current_vertex_id: int) -> bool:
+    return filter_in_progress_files(file_path) & filter_repeat_files(file_path, current_vertex_id)
+
+def filter_in_progress_files(file_path: str) -> bool:
+    """ Returns True if .db3, else False """
     # libtorrent usually passes the full or relative path as a string
     filename = os.path.basename(file_path)
     
@@ -57,6 +58,19 @@ def sqlite_file_filter(file_path: str) -> bool:
         return False
 
     return True
+
+def filter_repeat_files(file_path: str, current_vertex_id: int) -> bool:
+    """ When repeating and torrenting, for experiments, we want to filter only pieces that have come before this localized submap"""
+    # get filename as hex
+    base_name = os.path.basename(file_path)
+    hex_str, _ = os.path.splitext(base_name)
+    try:
+        hex_val = int(hex_str, 16)
+    except ValueError:
+        return False
+
+    # TODO: we only want to filter by run id, but for now, with only one run id per robot, we can just filter by magnitude
+    return current_vertex_id > hex_val
 
 def mutable_to_string(mutable_item):
     return f"robot id: {mutable_item['robot_id']}, seq: {mutable_item['seq']}, infohash: {mutable_item['infohash']}, my IP: {mutable_item['my_ip']}"

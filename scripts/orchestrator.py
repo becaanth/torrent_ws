@@ -1,5 +1,15 @@
+import logging
+import libtorrent as lt
+from nacl.signing import SigningKey
+import rclpy
+import argparse
+import json
+import os
+import threading
+
 from posegraph.live_deconstitution import Deconstitutor
 from posegraph.live_reconstitution import Reconstitutor
+from posegraph.tr_listener import RobotStateListener
 from torrent.mutable_seeder import MutableSeeder
 from torrent.mutable_peer import MutablePeer
 from torrent.zenoh_gossiper import ZenohGossiper
@@ -7,15 +17,6 @@ from torrent.piece_pickers import (
     get_policy, rarest_random, sequential, cascading, hybrid, sequence_random
 )
 from utils import *
-import logging
-
-import libtorrent as lt
-from nacl.signing import SigningKey
-import argparse
-import json
-import os
-
-import threading
 
 LT_PORT = 5204
 
@@ -123,6 +124,13 @@ class Orchestrator:
             output_dir=rcv_pg
         )
 
+        # listen to T&R
+        if not rclpy.ok():
+            rclpy.init()
+
+        self.current_vtx = 0 # what vertex is this current agent at?
+        self.tr_listener = RobotStateListener(on_new_vertex=self.handle_new_vertex)
+
         self.threads = {}
 
     # Callbacks
@@ -149,6 +157,18 @@ class Orchestrator:
         self.topology[robot_id] = topology
         self.rec.update_topology(robot_id, topology)
 
+    def handle_new_vertex(self, vertex_id):
+        # localized to new vertex, pass to seeder to filter files in repeat (cb from tr_listener)
+        logging.info(f"localized to {vertex_id}, telling seeder")
+        self.seeder.current_vtx = vertex_id
+
+    def _spin_ros(self):
+        """ Helper to spin ROS2 thread """
+        try:
+            rclpy.spin(self.tr_listener)
+        except Exception as e:
+            logging.error(f"ROS2 spin error: {e}")
+
     def run(self):
         logging.info("[agent.run]")
 
@@ -157,6 +177,8 @@ class Orchestrator:
         self.threads["gossiper"] = threading.Thread(target=self.gossiper.run, daemon=True, name="GossiperThread")
         self.threads["peer"] = threading.Thread(target=self.peer.run, daemon=True, name="PeerThread")
         self.threads["rec"] =threading.Thread(target=self.rec.run, daemon=True,name="ReconstitutorThread")
+
+        self.threads["listener"] = threading.Thread(target = self._spin_ros, daemon=True, name="RepeatListenerThread")
         startup_threads = list(self.threads.values())
 
         for t in startup_threads:
@@ -172,6 +194,15 @@ class Orchestrator:
                     t.join(timeout=1.0)
         except KeyboardInterrupt:
             logging.info("Interrupted, shutting down orchestrator")
+        finally:
+            self.shutdown()
+
+    def shutdown(self):
+        """Clean up ROS 2 node and context."""
+        if hasattr(self, 'listener'):
+            self.listener.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Teach, Torrent, Repeat Agent")
