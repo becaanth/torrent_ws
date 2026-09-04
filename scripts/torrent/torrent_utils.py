@@ -73,7 +73,7 @@ def filter_repeat_files(file_path: str, current_vertex_id: int) -> bool:
     print(f"hex_val {hex_val}")
 
     # TODO: we only want to filter by run id, but for now, with only one run id per robot, we can just filter by magnitude
-    return current_vertex_id > hex_val
+    return current_vertex_id >= hex_val
 
 def mutable_to_string(mutable_item):
     return f"robot id: {mutable_item['robot_id']}, seq: {mutable_item['seq']}, infohash: {mutable_item['infohash']}, my IP: {mutable_item['my_ip']}"
