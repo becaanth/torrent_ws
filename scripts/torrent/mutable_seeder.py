@@ -50,6 +50,7 @@ class MutableSeeder:
 
         # listen to T&R for most recent localized to submap
         self.current_vtx = 0
+        self.prev_vtx = 0
 
         # metrics
         self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_seeder.csv"
@@ -100,8 +101,10 @@ class MutableSeeder:
         if len(curr_files) == 0 or self.current_vtx == 0: # sentinel
             return
 
-        if self._has_new_file() or self.start_flag == False:
+        # if new file (Teach), or new current_vtx (Repeat), or first ses
+        if self._has_new_file() or self.current_vtx != self.prev_vtx or self.start_flag == False:
             self.start_flag = True
+            self.prev_vtx = self.current_vtx
 
             # create snapshot of pcs dir
             ti = self.create_snapshot()
