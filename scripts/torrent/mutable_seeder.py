@@ -47,6 +47,7 @@ class MutableSeeder:
         self.t_ses = t_ses
         self.t_lock = t_lock
         self.current_handle = None
+        self.len_metadata = 0
 
         # listen to T&R for most recent localized to submap
         self.current_vtx = 0
@@ -74,7 +75,8 @@ class MutableSeeder:
                         'timestamp', 'info_hash', 'robot_id',
                         'up_all_time', 
                         'up_payload_rate',
-                        'total_pieces'
+                        'total_pieces',
+                        'len_metadata'
                     ])
 
     def run(self):
@@ -151,7 +153,7 @@ class MutableSeeder:
             self.eval_trs()
         except Exception as e:
             logging.info(f"couldnt eval_trs because of {e}")
-            
+
     def _has_new_file(self):
         current_count = len(os.listdir(self.input_path))
         if current_count > self._last_file_count:
@@ -216,6 +218,11 @@ class MutableSeeder:
                 continue
             
         ti = lt.torrent_info(torrent_dict)
+        metadata = ti.metadata()
+        if metadata:
+            self.len_metadata = len(metadata)
+            logging.info(f"Metadata size: {self.len_metadata} bytes")
+
         self.bencoded_torrent_dict = lt.bencode(torrent_dict)
 
         return ti
@@ -243,7 +250,8 @@ class MutableSeeder:
                 writer = csv.writer(f)
                 writer.writerow([
                     timestamp, info_hash, self.robot_id,
-                    up_all_time, up_payload_rate, total_pieces
+                    up_all_time, up_payload_rate, total_pieces,
+                    self.len_metadata
                 ])
         except Exception as e:
             logging.info(f"Eval report is not ready bc {e}")

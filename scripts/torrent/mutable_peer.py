@@ -53,6 +53,7 @@ class MutablePeer:
         self.on_metadata_received = on_metadata_received   # pass to Reconstitutor
 
         # metrics
+        self.len_metadata = 0
         self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_{self.policy.__name__}.csv"
         self._init_metrics_csv()
 
@@ -69,7 +70,8 @@ class MutablePeer:
                         'up_all_time', 'down_all_time', 
                         'up_payload_rate', 'down_payload_rate',
                         'sequentiality', 'useful_pieces', 'this_robots_pieces', 'total_pieces',
-                        'robustness'
+                        'robustness',
+                        'len_metadata'
                     ])
 
     def run(self):
@@ -190,7 +192,8 @@ class MutablePeer:
                             up_all_time, down_all_time,
                             up_payload_rate, down_payload_rate,
                             sequentiality, U, M, l, 
-                            R
+                            R,
+                            self.len_metadata
                         ])
                 except Exception as e:
                     logging.info(f"Eval report is not ready bc {e}")
@@ -297,6 +300,9 @@ class MutablePeer:
         logging.info(f"_handle_metadata_completion: robot_id is {robot_id}")
 
         metadata = info.metadata()
+        if metadata:
+            self.len_metadata = len(metadata)
+            logging.info(f"Received metadata for {infohash_bytes.hex()} | Size: {self.len_metadata} bytes")
 
         # orchestrator callback
         if metadata and self.on_metadata_received:
