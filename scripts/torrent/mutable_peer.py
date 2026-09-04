@@ -88,7 +88,11 @@ class MutablePeer:
                 
                 current_time = time.time()
                 if current_time - last_sample_time >= 1.0:
-                    self._eval_trs()
+                    try:
+                        self._eval_trs()
+                    except Exception as e:
+                        logging.info(f"couldnt eval_trs because of {e}")
+
                     last_sample_time = current_time # Reset the timer
                 
                 time.sleep(sleep_duration)

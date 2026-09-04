@@ -102,7 +102,8 @@ class MutableSeeder:
             return
 
         # if new file (Teach), or new current_vtx (Repeat), or first ses
-        if self._has_new_file() or self.current_vtx != self.prev_vtx or self.start_flag == False:
+        # TODO: 5 is a magic number! but no easy way to find current submap; we dont want a new snapshot with each new vtx
+        if self._has_new_file() or self.current_vtx - self.prev_vtx > 5 or self.start_flag == False:
             self.start_flag = True
             self.prev_vtx = self.current_vtx
 
@@ -146,8 +147,11 @@ class MutableSeeder:
                     lt.listen_succeeded_alert, lt.incoming_connection_alert)):
                     logging.info(f"[Seeder] alert: {a}")
 
-        self.eval_trs()
-
+        try:
+            self.eval_trs()
+        except Exception as e:
+            logging.info(f"couldnt eval_trs because of {e}")
+            
     def _has_new_file(self):
         current_count = len(os.listdir(self.input_path))
         if current_count > self._last_file_count:
