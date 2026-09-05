@@ -55,7 +55,8 @@ class MutableSeeder:
         self.prev_vtx = 0
 
         # metrics
-        self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_seeder.csv"
+        timestamp = time.time()
+        self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_seeder_{timestamp}.csv"
         self._init_metrics_csv()
 
         # etc

@@ -55,7 +55,8 @@ class MutablePeer:
         # metrics
         self.len_metadata = 0
         self.len_torrent = 0
-        self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_{self.policy.__name__}.csv"
+        timestamp = time.time()
+        self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_{self.policy.__name__}_{timestamp}.csv"
         self._init_metrics_csv()
 
         # etc
