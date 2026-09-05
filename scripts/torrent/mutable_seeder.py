@@ -171,7 +171,6 @@ class MutableSeeder:
         logging.info(f"snapshot input path : {self.input_path}")
         fs = lt.file_storage()
         fs.set_piece_length(PIECE_SIZE)
-        logging.info(f"add_files getsize() = {os.path.getsize()}")
         lt.add_files(
              fs, 
              self.input_path, 
@@ -180,7 +179,6 @@ class MutableSeeder:
         ) 
 
         t = lt.create_torrent(fs, PIECE_SIZE)        
-        logging.info(f"set_pieces_hashes getsize() = {os.path.getsize()}")
         lt.set_piece_hashes(t, os.path.dirname(self.input_path))
 
         torrent_dict = t.generate()
