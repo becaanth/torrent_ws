@@ -101,13 +101,6 @@ class Deconstitutor:
 
         os.makedirs(self.output_dir, exist_ok=True)
 
-        # temp directory to write padding to files without race with seeder
-        self.staging_dir = os.path.join(
-            os.path.dirname(self.output_dir.rstrip('/')),
-            f".staging_{os.path.basename(self.output_dir)}"
-        )
-        os.makedirs(self.staging_dir, exist_ok=True)
-
         # --- source db3 relative paths ---------------------------------------
         self._db_relpaths = {
             'vertices'     : 'vertices/vertices_0.db3',
@@ -314,6 +307,7 @@ class Deconstitutor:
             if i == last_local_idx:
                 # If this is the last submap, evaluate if it constitutes a merge
                 logging.info("this is the last submap")
+                logging.info(f"{[inspect_ros_data(e) for _, e in chunk_edges.iterrows()]}")
                 
                 merges_to_remote = False
                 # Only inspect edges connected to this local submap TODO: figure out merging
@@ -336,15 +330,13 @@ class Deconstitutor:
                     continue    
 
             # --- write chunk ------------------------------------------------
-            filename = f"{str(hex(int(sid)))[2:].zfill(16)}.db3"
-            staging_path = os.path.join(self.staging_dir, filename)
-            final_path = os.path.join(self.output_dir, filename)
+            db_path = os.path.join(self.output_dir, f"{str(hex(int(sid)))[2:].zfill(16)}.db3")
 
             # Drop the rowid column before writing — not part of original schema
             def _drop_rowid(df: pd.DataFrame) -> pd.DataFrame:
                 return df.drop(columns=['rowid'], errors='ignore')
 
-            conn = sqlite3.connect(staging_path)
+            conn = sqlite3.connect(db_path)
             if self._index_df is not None:
                 _drop_rowid(self._index_df).to_sql('vtr_index',  conn, if_exists='replace', index=False)
             _drop_rowid(chunk_vtxs).to_sql('vertices', conn, if_exists='replace', index=False)
@@ -358,10 +350,9 @@ class Deconstitutor:
             # for _, e in chunk_edges.iterrows():
             #     logging.info(f"chunk_edges {inspect_ros_data(e)}")
 
-            pad_file_to_exact_size(staging_path, PIECE_SIZE)
-            os.rename(staging_path, final_path)
+            pad_file_to_exact_size(db_path, PIECE_SIZE)
             self._written_chunks.add(i)
-            logging.debug(f"finalized chunk {filename}")
+            logging.debug(f"finalized chunk {str(hex(int(sid)))[2:].zfill(16)}.db3")
 
     # ------------------------------------------------------------------
     # Cleanup
