@@ -105,31 +105,30 @@ class MutablePeer:
         # Monitor existing torrents
         with self.t_lock:
             alerts = self.t_ses.pop_alerts()
-        
-        for alert in alerts:
-            # received metadata
-            logging.info(alert)
-            if isinstance(alert, lt.metadata_received_alert):
-                handle = alert.handle  # Direct handle reference attached to the alert!
-                logging.info(f"metadata received for torrent: {handle.info_hash()}")
-                self._handle_metadata_completion(handle)
-                handle.unset_flags(lt.torrent_flags.upload_mode)  # now allow downloading
+            for alert in alerts:
+                # received metadata
+                logging.info(alert)
+                if isinstance(alert, lt.metadata_received_alert):
+                    handle = alert.handle  # Direct handle reference attached to the alert!
+                    logging.info(f"metadata received for torrent: {handle.info_hash()}")
+                    self._handle_metadata_completion(handle)
+                    handle.unset_flags(lt.torrent_flags.upload_mode)  # now allow downloading
 
-            # piece/file completed
-            elif isinstance(alert, lt.file_completed_alert):
-                handle = alert.handle  # Direct handle reference!
-                try:
-                    file_idx = alert.index # The file/piece index that completed
-                    logging.info(f"file {file_idx} completed on torrent: {handle.info_hash()}")
-                except:
-                    logging.info(f"file_idx alert corrupted")
-            
-                # Directly execute your policy update on that specific handle
-                self._on_file_completed(handle)
-            
-            # connection/debug            
-            elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
-                logging.debug(f"peer event: {alert}")
+                # piece/file completed
+                elif isinstance(alert, lt.file_completed_alert):
+                    handle = alert.handle  # Direct handle reference!
+                    try:
+                        file_idx = alert.index # The file/piece index that completed
+                        logging.info(f"file {file_idx} completed on torrent: {handle.info_hash()}")
+                    except:
+                        logging.info(f"file_idx alert corrupted")
+                
+                    # Directly execute your policy update on that specific handle
+                    self._on_file_completed(handle)
+                
+                # connection/debug            
+                elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
+                    logging.debug(f"peer event: {alert}")
 
     def _reconnect_known_peers(self):
         """

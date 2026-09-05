@@ -77,7 +77,8 @@ class MutableSeeder:
                         'up_all_time', 
                         'up_payload_rate',
                         'total_pieces',
-                        'len_metadata', 'len_torrent'
+                        'len_metadata', 'len_torrent',
+                        'current_vtx'
                     ])
 
     def run(self):
@@ -121,9 +122,9 @@ class MutableSeeder:
                 })
                 new_handle.unset_flags(lt.torrent_flags.paused | lt.torrent_flags.auto_managed)
             if self.current_handle is not None:
-                 logging.info(f"curr handle: {self.current_handle}")
-                 self.current_handle.pause()
-                 with self.t_lock:
+                logging.info(f"curr handle: {self.current_handle}")
+                with self.t_lock:
+                    self.current_handle.pause()
                     self.t_ses.remove_torrent(self.current_handle)
             self.current_handle = new_handle
             
@@ -170,6 +171,7 @@ class MutableSeeder:
         logging.info(f"snapshot input path : {self.input_path}")
         fs = lt.file_storage()
         fs.set_piece_length(PIECE_SIZE)
+        logging.info(f"add_files getsize() = {os.path.getsize()}")
         lt.add_files(
              fs, 
              self.input_path, 
@@ -178,6 +180,7 @@ class MutableSeeder:
         ) 
 
         t = lt.create_torrent(fs, PIECE_SIZE)        
+        logging.info(f"set_pieces_hashes getsize() = {os.path.getsize()}")
         lt.set_piece_hashes(t, os.path.dirname(self.input_path))
 
         torrent_dict = t.generate()
@@ -254,7 +257,8 @@ class MutableSeeder:
                 writer.writerow([
                     timestamp, info_hash, self.robot_id,
                     up_all_time, up_payload_rate, total_pieces,
-                    self.len_metadata, self.len_torrent
+                    self.len_metadata, self.len_torrent,
+                    self.current_vtx
                 ])
         except Exception as e:
             logging.info(f"Eval report is not ready bc {e}")
