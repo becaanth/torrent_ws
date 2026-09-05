@@ -46,7 +46,7 @@ class Orchestrator:
 
         logging.info(f"init with id {robot_id}, posegraph {posegraph}, policy {policy}")
         # libtorrent session for this device
-        self.t_lock = threading.Lock()
+        self.t_lock = threading.RLock()
         alert_mask = (
             lt.alert_category.status
             | lt.alert_category.file_progress
