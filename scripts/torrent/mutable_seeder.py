@@ -95,7 +95,10 @@ class MutableSeeder:
                 # sample TRS once per second
                 current_time = time.time()
                 if current_time - last_trs_time >= 1.0:
-                    self.eval_trs()
+                    try:
+                        self.eval_trs()
+                    except Exception as e:
+                        logging.warning(f"couldnt eval_trs because of {e}")
                     last_trs_time = current_time
                 time.sleep(sleep_duration)
         except KeyboardInterrupt:
@@ -145,7 +148,7 @@ class MutableSeeder:
                 logging.debug(f"  Error:    {s.errc.message()}")         # Should be 0 / None
                 logging.debug(f"  Has Metadata: {handle.has_metadata()}")
         
-            logging.info(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
+                logging.info(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
             for a in self.t_ses.pop_alerts():
                 if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
                     lt.peer_error_alert, lt.listen_failed_alert,
@@ -233,9 +236,12 @@ class MutableSeeder:
     def eval_trs(self):
         timestamp = time.time()
         with self.t_lock:
-            if self.current_handle:
-                s = self.current_handle.status()
-                info_hash = str(self.current_handle.info_hash())
+            if self.current_handle is None or not self.current_handle.is_valid():
+                logging.debug("eval_trs: current_handle missing or invalid, skipping this tick")
+                return
+            
+            s = self.current_handle.status()
+            info_hash = str(self.current_handle.info_hash())
 
         try:
             up_all_time = s.all_time_upload
