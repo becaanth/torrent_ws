@@ -55,8 +55,7 @@ class MutablePeer:
         # metrics
         self.len_metadata = 0
         self.len_torrent = 0
-        timestamp = time.time()
-        self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_{self.policy.__name__}_{timestamp}.csv"
+        self.metrics_csv = f"csv/trs_{self.robot_id}_{self.posegraph}_{self.policy.__name__}.csv"
         self._init_metrics_csv()
 
         # etc
@@ -106,30 +105,31 @@ class MutablePeer:
         # Monitor existing torrents
         with self.t_lock:
             alerts = self.t_ses.pop_alerts()
-            for alert in alerts:
-                # received metadata
-                logging.info(alert)
-                if isinstance(alert, lt.metadata_received_alert):
-                    handle = alert.handle  # Direct handle reference attached to the alert!
-                    logging.info(f"metadata received for torrent: {handle.info_hash()}")
-                    self._handle_metadata_completion(handle)
-                    handle.unset_flags(lt.torrent_flags.upload_mode)  # now allow downloading
+        
+        for alert in alerts:
+            # received metadata
+            logging.info(alert)
+            if isinstance(alert, lt.metadata_received_alert):
+                handle = alert.handle  # Direct handle reference attached to the alert!
+                logging.info(f"metadata received for torrent: {handle.info_hash()}")
+                self._handle_metadata_completion(handle)
+                handle.unset_flags(lt.torrent_flags.upload_mode)  # now allow downloading
 
-                # piece/file completed
-                elif isinstance(alert, lt.file_completed_alert):
-                    handle = alert.handle  # Direct handle reference!
-                    try:
-                        file_idx = alert.index # The file/piece index that completed
-                        logging.info(f"file {file_idx} completed on torrent: {handle.info_hash()}")
-                    except:
-                        logging.info(f"file_idx alert corrupted")
-                
-                    # Directly execute your policy update on that specific handle
-                    self._on_file_completed(handle)
-                
-                # connection/debug            
-                elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
-                    logging.debug(f"peer event: {alert}")
+            # piece/file completed
+            elif isinstance(alert, lt.file_completed_alert):
+                handle = alert.handle  # Direct handle reference!
+                try:
+                    file_idx = alert.index # The file/piece index that completed
+                    logging.info(f"file {file_idx} completed on torrent: {handle.info_hash()}")
+                except:
+                    logging.info(f"file_idx alert corrupted")
+            
+                # Directly execute your policy update on that specific handle
+                self._on_file_completed(handle)
+            
+            # connection/debug            
+            elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
+                logging.debug(f"peer event: {alert}")
 
     def _reconnect_known_peers(self):
         """
@@ -178,15 +178,12 @@ class MutablePeer:
 
                     eval_string = (
                     f"Eval report for handle {info_hash}\n"
-                    f" Progress: this robot has {M} of {l} pieces!"
                     f" Throughput Up: {up_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
                     f" Throughput Down: {down_payload_rate / 1e6:.2f} MB/s (Total: {down_all_time / 1e6:.2f} MB)\n"
                     f" Sequentiality: {sequentiality:.4f} ({U}/{M} useful pieces)\n"
                     f" Robustness: {R:.4f} (r_bar={r_bar:.2f})"
                     )                        
                     logging.info(eval_string)
-                    if M == l:
-                        logging.info(f"robot has downloaded all pieces for hash {info_hash}")
 
                     with open(self.metrics_csv, mode='a', newline='') as f:
                         writer = csv.writer(f)
