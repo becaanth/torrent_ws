@@ -314,7 +314,6 @@ class Deconstitutor:
             if i == last_local_idx:
                 # If this is the last submap, evaluate if it constitutes a merge
                 logging.info("this is the last submap")
-                logging.info(f"{[inspect_ros_data(e) for _, e in chunk_edges.iterrows()]}")
                 
                 merges_to_remote = False
                 # Only inspect edges connected to this local submap TODO: figure out merging
