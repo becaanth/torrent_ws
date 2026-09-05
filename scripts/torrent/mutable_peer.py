@@ -178,12 +178,15 @@ class MutablePeer:
 
                     eval_string = (
                     f"Eval report for handle {info_hash}\n"
+                    f" Progress: this robot has {M} of {l} pieces!"
                     f" Throughput Up: {up_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
                     f" Throughput Down: {down_payload_rate / 1e6:.2f} MB/s (Total: {down_all_time / 1e6:.2f} MB)\n"
                     f" Sequentiality: {sequentiality:.4f} ({U}/{M} useful pieces)\n"
                     f" Robustness: {R:.4f} (r_bar={r_bar:.2f})"
                     )                        
                     logging.info(eval_string)
+                    if M == l:
+                        logging.info(f"robot has downloaded all pieces for hash {info_hash}")
 
                     with open(self.metrics_csv, mode='a', newline='') as f:
                         writer = csv.writer(f)
