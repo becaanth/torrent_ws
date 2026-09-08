@@ -96,7 +96,7 @@ class Orchestrator:
             this_robot_id=self.robot_id,
             robot_id=self.robot_id,
             state=state,
-            poll_hz=1/17,
+            poll_hz=1/11,
             t_ses=self.t_ses,
             t_lock=self.t_lock,
             my_ip=self.my_ip,
