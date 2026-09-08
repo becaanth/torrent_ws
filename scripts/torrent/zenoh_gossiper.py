@@ -40,6 +40,7 @@ class ZenohGossiper:
         self._pending_items = {} # robot_id -> latest not processed mi
 
         self.mutable_items = {} # robot_id -> latest known mi
+        self._items_lock = Lock()
         self.max_seq_seen = {} # robot_id -> highest seq observed
 
         # callbacks to seeder and peer
@@ -67,8 +68,9 @@ class ZenohGossiper:
         """
         item = dict(mutable_item)
         item['my_ip'] = self.my_ip
-        self.mutable_items[item['robot_id']] = item
-        self.max_seq_seen[item['robot_id']] = item['seq']
+        with self._items_lock:
+            self.mutable_items[item['robot_id']] = item
+            self.max_seq_seen[item['robot_id']] = item['seq']
         self._put(item)
 
     def _put(self, mutable_item : dict):
@@ -90,7 +92,10 @@ class ZenohGossiper:
         periodically re-announce everything currently known
         """
         logging.debug(f"rebroadcasting known items")
-        for robot_id, mutable_item in self.mutable_items.items():
+        with self._items_lock:
+            items_snapshot = list(self.mutable_items.values())
+
+        for mutable_item in items_snapshot:
             self._forward_gossip(mutable_item)
 
     def sample_to_mutable_item(self, sample):
@@ -137,15 +142,15 @@ class ZenohGossiper:
             logging.info("received mutable item from own ip; ignore")
             return
 
-        last_seq = self.max_seq_seen.get(robot_id, -1)
-        if seq <= last_seq:
-            logging.debug(f"ignoring stale seq {seq} for robot_id {robot_id}, have seq {last_seq}")
-            return
-        self.max_seq_seen[robot_id] = seq
-
-        # highest seq we've seen. is this for a new robot or an update
-        is_new = robot_id not in self.mutable_items
-        self.mutable_items[robot_id] = mutable_item
+        with self._items_lock:
+            last_seq = self.max_seq_seen.get(robot_id, -1)
+            if seq <= last_seq:
+                logging.debug(f"ignoring stale seq {seq} for robot_id {robot_id}, have seq {last_seq}")
+                return
+            self.max_seq_seen[robot_id] = seq
+            # highest seq we've seen. is this for a new robot or an update
+            is_new = robot_id not in self.mutable_items
+            self.mutable_items[robot_id] = mutable_item
 
         if is_new:
             logging.info(f"new mutable item for robot_id {robot_id}")

@@ -209,16 +209,15 @@ class MutablePeer:
 
         self.known_infohash[robot_id] = bytes(infohash)
         with self.t_lock:
-                handle = self.t_ses.add_torrent({
+            handle = self.t_ses.add_torrent({
                 'info_hash': infohash,
                 'save_path': self.output_path,
                 'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
-            })
+            }) 
+            for ip, p in self.peers:
+                logging.info(f"connecting {handle.info_hash()} via {ip}")
+                handle.connect_peer((ip, p))
         self.torrent_handles[robot_id] = handle
- 
-        for ip, p in self.peers:
-            logging.info(f"connecting {handle.info_hash()} via {ip}")
-            handle.connect_peer((ip, p))
 
     def update_torrent(self, robot_id, infohash, peer_ip):
         """
@@ -258,11 +257,10 @@ class MutablePeer:
                 'save_path': self.output_path,
                 'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
             })
+            for ip, p in self.peers:
+                logging.debug(f"attempting connect_peer to {(ip, p)}")
+                new_handle.connect_peer((ip, p))
         self.torrent_handles[robot_id] = new_handle
- 
-        for ip, p in self.peers:
-            logging.debug(f"attempting connect_peer to {(ip, p)}")
-            new_handle.connect_peer((ip, p))
 
     def _remember_peer(self, peer_ip):
         peer_endpoint = (peer_ip, PORT)
