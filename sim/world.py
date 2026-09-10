@@ -81,7 +81,7 @@ class World:
             if self.t + 1e-9 >= self._next_repeat_t[agent.rid]:
                 moved[agent.rid] = agent.topological_move(agent.target_session, movement=+1)
                 self._next_repeat_t[agent.rid] += self.repeat_period
-                
+
         self.t += self.dt
         return {'t': self.t, 'transfers': dict(transfers), 'moved': moved}
 
@@ -138,7 +138,8 @@ class World:
                 sources.append(agent)
         return sources
 
-    def _resolve_transfers(self, leech_requests):
+    def _resolve_transfers(self, leech_requests: dict[int, tuple[str, int, int]]):
+        provider_queues = defaultdict(list)  # provider_id -> list of (leecher_id, session_id, piece_idx)
         demand_per_source = defaultdict(list) # source_rid -> [(leecher, session_id, piece_idx)]
         for leecher_rid, (session_id, piece_idx) in leech_requests.items():
             leecher = self.agents[leecher_rid]

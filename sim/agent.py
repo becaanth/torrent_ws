@@ -27,8 +27,8 @@ class Submap:
     """
     an atomic submap, with a position and state=1 for topology, state=2 for full data
     """
-    def __init__(self, rid, x, y, idx, state, size_bytes=PIECE_SIZE):
-        self.rid = rid
+    def __init__(self, robot_id, x, y, idx, state, size_bytes=PIECE_SIZE):
+        self.robot_id = robot_id
         # metric position
         self.x = x
         self.y = y
@@ -50,7 +50,7 @@ class Submap:
             self.state = Status.FULL_DATA
 
     def __repr__(self):
-        return f"robot: {self.rid}, idx: {self.idx}, state: {self.state}, x: {self.x}, y: {self.y}"
+        return f"robot: {self.robot_id}, idx: {self.idx}, state: {self.state}, x: {self.x}, y: {self.y}"
 
     
 class Agent:
@@ -69,11 +69,11 @@ class Agent:
     -> matters when about to reach last posessed map (i.e. short-range convoy)
     -> doesnt matter when you arent using these maps (i.e. you are creating or repeating on your own maps)
     """
-    def __init__(self, rid, x0, y0, radio_quality, policy, role, target_session=None, pol_param=1.0, piece_size=PIECE_SIZE, start_delay=0.0):
+    def __init__(self, robot_id, x0, y0, radio_quality, policy, role, target_session=None, pol_param=1.0, piece_size=PIECE_SIZE, start_delay=0.0):
         # init
-        self.rid = rid
-        self.session_id = str(rid) if role == Role.TEACH else None
-        self.target_session = target_session # path we are rpeeating to. None if teacher
+        self.robot_id = robot_id
+        self.session_id = str(robot_id) if role == Role.TEACH else None
+        self.target_session = target_session # path we are repeating to. None if teacher
         self.x = x0
         self.y = y0
         self.radio_quality = radio_quality
@@ -88,7 +88,7 @@ class Agent:
         self.priorities: dict[str, np.ndarray] = {}
         self.download_order: dict[str, list[int]] = {}
 
-        origin = Submap(rid=self.rid, x=x0, y=y0, idx=0, state=Status.FULL_DATA, size_bytes=piece_size)
+        origin = Submap(robot_id=self.robot_id, x=x0, y=y0, idx=0, state=Status.FULL_DATA, size_bytes=piece_size)
         self.local_maps.append(origin)
         self.current_submap = origin
         self.start_delay = start_delay
@@ -101,7 +101,7 @@ class Agent:
         self.x += dx
         self.y += dy
         new_submap = Submap(
-            rid=self.rid, 
+            robot_id=self.robot_id, 
             x=self.x, 
             y=self.y, 
             idx=len(self.local_maps), 
@@ -119,7 +119,7 @@ class Agent:
         if session_id in self.remote_maps:
             return
         self.remote_maps[session_id] = [
-            Submap(rid=s.rid, x=s.x, y=s.y, idx=s.idx, state=Status.TOPOLOGY, size_bytes=self.piece_size)
+            Submap(robot_id=s.robot_id, x=s.x, y=s.y, idx=s.idx, state=Status.TOPOLOGY, size_bytes=self.piece_size)
             for s in remote_submaps
         ]
         self.priorities[session_id] = np.zeros(len(remote_submaps), dtype=int)
