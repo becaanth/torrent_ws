@@ -339,21 +339,19 @@ class Deconstitutor:
                 logging.info("this is the last submap")
                 
                 merges_to_remote = False
-                # Only inspect edges connected to this local submap TODO: resolve merging
-                ingress_id = int(self._from_ids[e_mask][0]) # vertex from incoming edge
-                egress_id = int(self._to_ids[e_mask][-1]) # vertex at outgoing edge
-                logging.debug(f"ingress: {ingress_id}, egress: {egress_id}")
-                logging.debug(f"from: {self._from_ids[e_mask]}, to: {self._to_ids[e_mask]}")
-                
-                if extract_robot_id(ingress_id) != extract_robot_id(egress_id):
-                    # ingress/egress came from different robots. this is a merge to remote
-                    merges_to_remote = True
-                    logging.info(f"merging local to remote!")
-                elif extract_major_id(ingress_id) != extract_major_id(egress_id):
-                    # ingress/egress came from same robot but different runs. this is a merge to local
-                    merges_to_remote = True
-                    logging.info(f"merging local to local!")
+                from_ids_i = self._from_ids[e_mask]
+                to_ids_i = self._to_ids[e_mask]
 
+                for f_id, t_id in zip(from_ids_i, to_ids_i):
+                    f_id, t_id = int(f_id), int(t_id)
+                    if extract_robot_id(f_id) != extract_robot_id(t_id):
+                        merges_to_remote = True
+                        logging.info(f"merging local to remote! edge {f_id} -> {t_id}")
+                        break
+                    elif extract_major_id(f_id) != extract_major_id(t_id):
+                        merges_to_remote = True
+                        logging.info(f"merging local to local! edge {f_id} -> {t_id}")
+                        break
                 if not merges_to_remote:
                     # nothing to merge, ignore the current submap
                     logging.info("skipping, no merges to remote")
@@ -369,6 +367,7 @@ class Deconstitutor:
             #         self._written_chunks.add(i)
             #         continue    
 
+            # non-manual edge filter, except for merge/branch boundaries
             if not merges_to_remote and len(chunk_edges) > 0:
                 edge_modes = [inspect_ros_data(e).mode.mode for _, e in chunk_edges.iterrows()]
                 if any(mode != 1 for mode in edge_modes):
