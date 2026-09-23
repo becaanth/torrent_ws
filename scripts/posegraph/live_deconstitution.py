@@ -143,6 +143,8 @@ class Deconstitutor:
         # track local submaps
         self._pending_positions: list[int] = []   # anchor looked foreign; unresolved until pointmap_ptr arrives
         self._local_submaps_positions: list[int] = []
+        self._transition_grace_active = False
+        self._grace_armed_by: int | None = None
 
         # index df read lazily on first successful connection
         self._index_df: pd.DataFrame | None = None
@@ -270,6 +272,9 @@ class Deconstitutor:
             member_vids = self._this_vids[ptr_row_idxs]
             if any(extract_robot_id(int(v)) == self.robot_id for v in member_vids):
                 bisect.insort(self._local_submaps_positions, i)  # branch anchor -- keep index order
+                if not self._transition_grace_active:
+                    self._transition_grace_active = True
+                    self._grace_armed_by = i
             # else: genuinely someone else's submap, drop permanently -- nothing to do
         self._pending_positions = still_pending
 
@@ -359,22 +364,25 @@ class Deconstitutor:
             else:
                 merges_to_remote = False # not a boundary map
 
-            # if chunk_edges are not manual, continue
-            # if len(chunk_edges) > 0:
-            #     edge_modes = [inspect_ros_data(e).mode.mode for _,e in chunk_edges.iterrows()]
-            #     if any(mode != 1 for mode in edge_modes):
-            #         logger.info(f"skipping non-manual piece")
-            #         self._written_chunks.add(i)
-            #         continue    
-
             # non-manual edge filter, except for merge/branch boundaries
-            if not merges_to_remote and len(chunk_edges) > 0:
+            if merges_to_remote and not self._transition_grace_active:
+                self._transition_grace_active = True
+                self._grace_armed_by = i
+
+
+            # non-manual gate:
+            if not (merges_to_remote or self._transition_grace_active) and len(chunk_edges) > 0:
                 edge_modes = [inspect_ros_data(e).mode.mode for _, e in chunk_edges.iterrows()]
                 if any(mode != 1 for mode in edge_modes):
                     logger.info(f"skipping non-manual piece")
                     self._written_chunks.add(i)
                     continue
-
+            elif (self._transition_grace_active and len(chunk_edges) > 0 and i != self._grace_armed_by):
+                edge_modes = [inspect_ros_data(e).mode.mode for _, e in chunk_edges.iterrows()]
+                if all(mode == 1 for mode in edge_modes):
+                    self._transition_grace_active = False   # manual driving has genuinely resumed
+                    self._grace_armed_by = None
+                    
             # --- write chunk ------------------------------------------------
             filename = f"{str(hex(int(sid)))[2:].zfill(16)}.db3"
             staging_path = os.path.join(self.staging_dir, filename)
