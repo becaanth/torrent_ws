@@ -318,8 +318,8 @@ class Deconstitutor:
                 
                 merges_to_remote = False
                 # Only inspect edges connected to this local submap TODO: resolve merging
-                ingress_id = self._from_ids[e_mask][0] # vertex from incoming edge
-                egress_id = self._to_ids[e_mask][-1] # vertex at outgoing edge
+                ingress_id = int(self._from_ids[e_mask][0]) # vertex from incoming edge
+                egress_id = int(self._to_ids[e_mask][-1]) # vertex at outgoing edge
                 logging.debug(f"ingress: {ingress_id}, egress: {egress_id}")
                 
                 if extract_robot_id(ingress_id) != extract_robot_id(egress_id):
