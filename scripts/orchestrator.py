@@ -164,6 +164,7 @@ class Orchestrator:
         logging.info(f"localized to {vertex_id}, telling seeder")
         # TODO: hardcoding this is stupid, but i dont care about repeats
         # self.seeder.current_vtx = vertex_id
+        self.seeder.current_vtx = int(2**63)
 
     def _spin_ros(self):
         """ Helper to spin ROS2 thread """
