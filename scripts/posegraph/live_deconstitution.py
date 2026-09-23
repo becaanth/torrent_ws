@@ -243,6 +243,7 @@ class Deconstitutor:
             self._submap_ids = np.append(self._submap_ids, sid)
             idx = len(self._submap_ids) - 1
             if extract_robot_id(int(sid)) == self.robot_id: # TODO: when branching the first vertex is NOT local
+                # maintain a list of indices to self._submap_ids for local maps
                 self._local_submaps_positions.append(idx)
 
     def _parse_pointmap_ptr(self, new_rows: pd.DataFrame):
@@ -316,14 +317,19 @@ class Deconstitutor:
                 logging.info("this is the last submap")
                 
                 merges_to_remote = False
-                # Only inspect edges connected to this local submap TODO: figure out merging
-                # for fid, tid in zip(self._from_ids[e_mask], self._to_ids[e_mask]):
-                #     if (extract_robot_id(int(fid)) != self.robot_id) or \
-                #     (extract_robot_id(int(tid)) != self.robot_id):
-                #         merges_to_remote = True
-                #         break
-                        
+                # Only inspect edges connected to this local submap TODO: resolve merging
+                ingress_id = self._from_ids[e_mask][0] # vertex from incoming edge
+                egress_id = self._to_ids[e_mask][-1] # vertex at outgoing edge
+                
+                if extract_robot_id(ingress_id) != extract_robot_id(egress_id):
+                    # ingress/egress came from different robots. this is a merge to remote
+                    merges_to_remote = True
+                elif extract_major_id(ingress_id) != extract_major_id(egress_id):
+                    # ingress/egress came from same robot but different runs. this is a merge to local
+                    merges_to_remote = True
+
                 if not merges_to_remote:
+                    # nothing to merge, ignore the current submap
                     logging.info("skipping, no merges to remote")
                     continue
 
