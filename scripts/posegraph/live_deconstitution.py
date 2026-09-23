@@ -321,13 +321,16 @@ class Deconstitutor:
                 ingress_id = int(self._from_ids[e_mask][0]) # vertex from incoming edge
                 egress_id = int(self._to_ids[e_mask][-1]) # vertex at outgoing edge
                 logging.debug(f"ingress: {ingress_id}, egress: {egress_id}")
+                logging.debug(f"from: {self._from_ids[e_mask]}, to: {self._to_ids[e_mask]}")
                 
                 if extract_robot_id(ingress_id) != extract_robot_id(egress_id):
                     # ingress/egress came from different robots. this is a merge to remote
                     merges_to_remote = True
+                    logging.info(f"merging local to remote!")
                 elif extract_major_id(ingress_id) != extract_major_id(egress_id):
                     # ingress/egress came from same robot but different runs. this is a merge to local
                     merges_to_remote = True
+                    logging.info(f"merging local to local!")
 
                 if not merges_to_remote:
                     # nothing to merge, ignore the current submap
