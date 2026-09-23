@@ -358,14 +358,23 @@ class Deconstitutor:
                     # nothing to merge, ignore the current submap
                     logging.info("skipping, no merges to remote")
                     continue
+            else:
+                merges_to_remote = False # not a boundary map
 
             # if chunk_edges are not manual, continue
-            if len(chunk_edges) > 0:
-                edge_modes = [inspect_ros_data(e).mode.mode for _,e in chunk_edges.iterrows()]
+            # if len(chunk_edges) > 0:
+            #     edge_modes = [inspect_ros_data(e).mode.mode for _,e in chunk_edges.iterrows()]
+            #     if any(mode != 1 for mode in edge_modes):
+            #         logger.info(f"skipping non-manual piece")
+            #         self._written_chunks.add(i)
+            #         continue    
+
+            if not merges_to_remote and len(chunk_edges) > 0:
+                edge_modes = [inspect_ros_data(e).mode.mode for _, e in chunk_edges.iterrows()]
                 if any(mode != 1 for mode in edge_modes):
                     logger.info(f"skipping non-manual piece")
                     self._written_chunks.add(i)
-                    continue    
+                    continue
 
             # --- write chunk ------------------------------------------------
             filename = f"{str(hex(int(sid)))[2:].zfill(16)}.db3"
