@@ -13,7 +13,7 @@ def rarest_random(priorities, mask, _):
     print(priorities)
     print(mask)
     # new_priorities = np.array([4 * (not bool(m)) for m in mask])
-    new_priorities = np.where(~mask, np.random.uniform(1.0, 5.0, size=len(mask)), 0.0)
+    new_priorities = np.where(np.logical_not(mask), np.random.uniform(1.0, 5.0, size=len(mask)), 0.0)
     return new_priorities
 
 def sequential(priorities, mask, _):
