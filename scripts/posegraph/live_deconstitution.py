@@ -27,6 +27,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+import bisect
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
@@ -140,6 +141,7 @@ class Deconstitutor:
         self._written_chunks: set[int] = set()
 
         # track local submaps
+        self._pending_positions: list[int] = []   # anchor looked foreign; unresolved until pointmap_ptr arrives
         self._local_submaps_positions: list[int] = []
 
         # index df read lazily on first successful connection
@@ -242,9 +244,11 @@ class Deconstitutor:
             sid = np.uint64(msg.vertex_id)
             self._submap_ids = np.append(self._submap_ids, sid)
             idx = len(self._submap_ids) - 1
-            if extract_robot_id(int(sid)) == self.robot_id: # TODO: when branching the first vertex is NOT local
+            if extract_robot_id(int(sid)) == self.robot_id:
                 # maintain a list of indices to self._submap_ids for local maps
                 self._local_submaps_positions.append(idx)
+            else:
+                self._pending_positions.append(idx)
 
     def _parse_pointmap_ptr(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
@@ -252,11 +256,29 @@ class Deconstitutor:
             self._this_vids = np.append(self._this_vids, np.uint64(msg.this_vid))
             self._map_vids  = np.append(self._map_vids,  np.uint64(msg.map_vid))
 
+    def _resolve_pending(self):
+        """Recheck anchor-foreign submaps once their member vertices are known.
+        Runs before the main write loop; typically a no-op (empty list) except
+        right after a branch event."""
+        still_pending = []
+        for i in self._pending_positions:
+            sid = int(self._submap_ids[i])
+            ptr_row_idxs = np.where(self._map_vids == sid)[0]
+            if len(ptr_row_idxs) == 0:
+                still_pending.append(i)   # pointmap_ptr not arrived yet, retry next poll
+                continue
+            member_vids = self._this_vids[ptr_row_idxs]
+            if any(extract_robot_id(int(v)) == self.robot_id for v in member_vids):
+                bisect.insort(self._local_submaps_positions, i)  # branch anchor -- keep index order
+            # else: genuinely someone else's submap, drop permanently -- nothing to do
+        self._pending_positions = still_pending
+
     def _write_new_chunks(self):
         """
         For each submap not yet written, check if we have enough data
         to write its chunk and write it if so.
         """
+        self._resolve_pending()
         if not self._local_submaps_positions:
             return
 
