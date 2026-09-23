@@ -468,8 +468,9 @@ class Reconstitutor:
                                 f"(vid={hex(piece.top_vertices[0].vertex_id)}) -- inserting fresh row "
                                 f"instead of dropping data"
                             )
-                            inserts.append((row['data'], int(row['timestamp']), rid))  
+                            inserts.append((row_key, int(row['timestamp']), row['data']))   # matches unpack order; drop the useless None rid
                             continue
+
                         updates.append((row['data'], int(row['timestamp']), rid))  
 
                     # Apply all updates to existing skeleton rows
