@@ -332,7 +332,7 @@ class Deconstitutor:
                 edge_modes = [inspect_ros_data(e).mode.mode for _,e in chunk_edges.iterrows()]
                 # if any(mode != 1 for mode in edge_modes):
                 if sum(mode != 1 for mode in edge_modes) > 1: # tolerate one non-manual edge fr branching
-                    logger.info(f"skipping non-manual piece")
+                    logger.info(f"skipping non-manual piece. edge_modes: {edge_modes}")
                     self._written_chunks.add(i)
                     continue    
 
