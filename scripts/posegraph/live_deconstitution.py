@@ -140,6 +140,7 @@ class Deconstitutor:
         self._written_chunks: set[int] = set()
 
         # track local submaps
+        self._all_submaps_positions: list[int] = []
         self._local_submaps_positions: list[int] = []
 
         # index df read lazily on first successful connection
@@ -242,7 +243,8 @@ class Deconstitutor:
             sid = np.uint64(msg.vertex_id)
             self._submap_ids = np.append(self._submap_ids, sid)
             idx = len(self._submap_ids) - 1
-            if extract_robot_id(int(sid)) == self.robot_id: # TODO: when branching the first vertex is NOT local
+            self._all_submaps_positions.append(idx)
+            if extract_robot_id(int(sid)) == self.robot_id:
                 self._local_submaps_positions.append(idx)
 
     def _parse_pointmap_ptr(self, new_rows: pd.DataFrame):
@@ -262,7 +264,7 @@ class Deconstitutor:
         # dont touch the in progress piece
         last_local_idx = self._local_submaps_positions[-1]
 
-        for i in self._local_submaps_positions:
+        for i in self._all_submaps_positions:
             if i in self._written_chunks:
                 continue
 
@@ -277,7 +279,14 @@ class Deconstitutor:
             relevant_vids = self._this_vids[ptr_row_idxs]
             logger.info(f"relevant_vids {relevant_vids}")
 
-            # pointmap row — single row at position i in accumulated df
+            is_local = (extract_robot_id(sid) == self.robot_id) or any(
+                extract_robot_id(int(v)) == self.robot_id for v in relevant_vids
+            )
+            if not is_local:
+                logging.debug(f"  [chunk {i}] SKIP: submap {sid} has no local vertices") 
+                self._written_chunks.add(i)
+                continue
+
             if i >= len(self._df['pointmap']):
                 continue
             chunk_submap = self._df['pointmap'].iloc[[i]]
