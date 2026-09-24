@@ -5,38 +5,8 @@ from rclpy.serialization import deserialize_message, serialize_message
 from posegraph_utils import *
 import matplotlib.pyplot as plt
 from collections import defaultdict, deque
+import argparse
 import pdb
-
-# Path to your .db3 file
-temp = os.getenv("VTRTEMP")
-pg = "def9"
-db = "edges"
-db_path = f"{temp}/pgs/{pg}/graph/{db}/{db}_0.db3"
-print(db_path)
-poll_data = {}
-
-conn = sqlite3.connect(db_path, isolation_level=None)
-for table in ["topics", "messages"]:
-    try:
-        df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
-        poll_data[table] = df
-    except Exception as e:
-        # logging.debug(f"_parse_piece id | {db_file} | {e}")
-        poll_data[table] = pd.DataFrame() 
-
-conn.close()
-
-to_list = []
-from_list = []
-for _, row in poll_data['messages'].iterrows():
-    msg_type = get_message(poll_data["topics"]['type'].iloc[0])
-    msg_data = row['data']
-    msg = deserialize_message(msg_data, msg_type)
-    to_list.append(msg.to_id)
-    from_list.append(msg.from_id)
-
-to_set = set(to_list)
-from_set = set(from_list)
 
 def find_graph_components(from_list, to_list):
     # Handle empty graph edge case
@@ -86,16 +56,52 @@ def find_graph_components(from_list, to_list):
         "components": components
     }
 
-analysis = find_graph_components(from_list, to_list)
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Teach, Torrent, Repeat Agent")
+    parser.add_argument('-p', '--posegraph', required=True,help="Bag name (subdirectory under folder_path)")
+    args = parser.parse_args()
 
-print(f"Is fully connected?: {analysis['is_connected']}")
-print(f"Total isolated groups: {analysis['total_components']}")
-print(f"Groups breakdown: {analysis['components']}")
+    # Path to your .db3 file
+    temp = os.getenv("VTRTEMP")
+    pg = args.posegraph
+    db = "edges"
+    db_path = f"{temp}/pgs/{pg}/graph/{db}/{db}_0.db3"
+    print(db_path)
+    poll_data = {}
 
-for component in analysis['components']:
-    print(f"len {len(component)}")
-# pdb.set_trace()
-# plt.plot(to_list)
-# plt.plot(from_list)
-# plt.show()
+    conn = sqlite3.connect(db_path, isolation_level=None)
+    for table in ["topics", "messages"]:
+        try:
+            df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
+            poll_data[table] = df
+        except Exception as e:
+            # logging.debug(f"_parse_piece id | {db_file} | {e}")
+            poll_data[table] = pd.DataFrame() 
+
+    conn.close()
+
+    to_list = []
+    from_list = []
+    for _, row in poll_data['messages'].iterrows():
+        msg_type = get_message(poll_data["topics"]['type'].iloc[0])
+        msg_data = row['data']
+        msg = deserialize_message(msg_data, msg_type)
+        to_list.append(msg.to_id)
+        from_list.append(msg.from_id)
+
+    to_set = set(to_list)
+    from_set = set(from_list)
+
+    analysis = find_graph_components(from_list, to_list)
+
+    print(f"Is fully connected?: {analysis['is_connected']}")
+    print(f"Total isolated groups: {analysis['total_components']}")
+    print(f"Groups breakdown: {analysis['components']}")
+
+    for component in analysis['components']:
+        print(f"len {len(component)}")
+    # pdb.set_trace()
+    # plt.plot(to_list)
+    # plt.plot(from_list)
+    # plt.show()
