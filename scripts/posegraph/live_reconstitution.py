@@ -470,7 +470,7 @@ class Reconstitutor:
                             )
                             inserts.append((row_key, int(row['timestamp']), rid))  
                             continue
-                        updates.append((row_key, int(row['timestamp']), rid))  
+                        updates.append((row['data'], int(row['timestamp']), rid))  
 
                     # Apply all updates to existing skeleton rows
                     if updates:
