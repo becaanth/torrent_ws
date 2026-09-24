@@ -258,12 +258,16 @@ class Deconstitutor:
         For each submap not yet written, check if we have enough data
         to write its chunk and write it if so.
         """
-        if not self._local_submaps_positions:
+        if not self._all_submaps_positions:
             return
 
         # dont touch the in progress piece
-        last_local_idx = self._local_submaps_positions[-1]
-
+        last_local_idx = (
+            self._local_submaps_positions[-1]
+            if self._local_submaps_positions
+            else self._all_submaps_positions[-1]
+        )
+        
         for i in self._all_submaps_positions:
             if i in self._written_chunks:
                 continue
