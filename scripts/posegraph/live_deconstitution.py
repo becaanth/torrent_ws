@@ -324,7 +324,6 @@ class Deconstitutor:
             sort_eidx   = np.argsort(self._from_ids[e_mask])
             candidate_chunk_edges = self._df['edges'].iloc[candidate_edges[sort_eidx]]
             chunk_edges = pd.DataFrame()
-            edge_modes = [(j,inspect_ros_data(e).mode.mode) for j,e in candidate_chunk_edges.iterrows()]
 
             # prune non-manual edges
             is_manual_mask = [
@@ -352,7 +351,6 @@ class Deconstitutor:
             if len(chunk_edges) == 0:
                 # all data is autonomous, no candidate chunk edges were valid. this submap is done
                 logging.info(f"there were no chunk edges for this submap")
-                self._written_chunks.add(i)
                 continue    
 
             # --- write chunk ------------------------------------------------
