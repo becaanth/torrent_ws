@@ -320,9 +320,18 @@ class Deconstitutor:
             from_mask = np.isin(self._from_ids, relevant_vids)
             to_mask = np.isin(self._to_ids, relevant_vids)
             e_mask = from_mask | to_mask
-            valid_edges = np.where(e_mask)[0]
+            candidate_edges = np.where(e_mask)[0]
             sort_eidx   = np.argsort(self._from_ids[e_mask])
-            chunk_edges = self._df['edges'].iloc[valid_edges[sort_eidx]]
+            candidate_chunk_edges = self._df['edges'].iloc[candidate_edges[sort_eidx]]
+            chunk_edges = pd.DataFrame()
+            edge_modes = [(j,inspect_ros_data(e).mode.mode) for j,e in candidate_chunk_edges.iterrows()]
+
+            # prune non-manual edges
+            is_manual_mask = [
+                inspect_ros_data(row).mode.mode == 1 
+                for _, row in candidate_chunk_edges.iterrows()
+            ]
+            chunk_edges = candidate_chunk_edges[is_manual_mask]
 
             if i == last_local_idx:
                 # If this is the last submap, evaluate if it constitutes a merge
@@ -340,14 +349,11 @@ class Deconstitutor:
                     logging.info("skipping, no merges to remote")
                     continue
 
-            # if chunk_edges are not manual, continue
-            if len(chunk_edges) > 0:
-                edge_modes = [inspect_ros_data(e).mode.mode for _,e in chunk_edges.iterrows()]
-                # if any(mode != 1 for mode in edge_modes):
-                if sum(mode != 1 for mode in edge_modes) > 1: # tolerate one non-manual edge fr branching
-                    logger.info(f"skipping non-manual piece. edge_modes: {edge_modes}")
-                    self._written_chunks.add(i)
-                    continue    
+            if len(chunk_edges) == 0:
+                # all data is autonomous, no candidate chunk edges were valid. this submap is done
+                logging.info(f"there were no chunk edges for this submap")
+                self._written_chunks.add(i)
+                continue    
 
             # --- write chunk ------------------------------------------------
             filename = f"{str(hex(int(sid)))[2:].zfill(16)}.db3"
@@ -368,9 +374,6 @@ class Deconstitutor:
             _drop_rowid(chunk_submap).to_sql('pointmap', conn, if_exists='replace', index=False)
             _drop_rowid(chunk_submap_ptrs).to_sql('pointmap_ptr', conn, if_exists='replace', index=False)
             conn.close()
-
-            # for _, e in chunk_edges.iterrows():
-            #     logging.info(f"chunk_edges {inspect_ros_data(e)}")
 
             pad_file_to_exact_size(staging_path, PIECE_SIZE)
             os.rename(staging_path, final_path)
@@ -402,7 +405,7 @@ if __name__ == "__main__":
 
     robot_id = os.getenv("ROBOT_ID")
     input_dir   = os.path.join(args.posegraph_root, args.posegraph, 'graph')
-    output_dir = os.path.join(args.piece_root, args.posegraph, robot_id)
+    output_dir = os.path.join(args.piece_root, f"{args.posegraph}_{robot_id}/{robot_id}")
     logging.info(f"ROBOT_ID : {robot_id}")
 
     dec = Deconstitutor(
