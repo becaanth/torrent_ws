@@ -83,10 +83,23 @@ if __name__ == "__main__":
             poll_data[table] = pd.DataFrame() 
     conn.close()
 
+    vertices = []
+    for _ , v in poll_data['vertices'].iterrows():
+        vertex = inspect_ros_data(v)
+        print(f"vertex: id {vertex.id}")
+        vertices.append(vertices)
+
     edges = []
     for _ , e in poll_data['edges'].iterrows():
         edge = inspect_ros_data(e)
         print(f"edge: mode {edge.mode.mode},type {edge.type.type}, to {edge.to_id}, from {edge.from_id}")
         edges.append(edge)
+
+    pointmap_ptrs = []
+    edges = []
+    for _ , p in poll_data['pointmap_ptr'].iterrows():
+        pointmap_ptr = inspect_ros_data(p)
+        print(f"pointmap_ptr: map_vid {pointmap_ptr.map_vid}, this_vid {pointmap_ptr.this_vid}")
+        pointmap_ptrs.append(pointmap_ptr)
 
     

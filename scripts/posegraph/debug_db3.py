@@ -59,14 +59,18 @@ def find_graph_components(from_list, to_list):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Teach, Torrent, Repeat Agent")
-    parser.add_argument('-p', '--posegraph', required=True,help="Bag name (subdirectory under folder_path)")
+    parser.add_argument('-p', '--posegraph', required=True,help="Posegraph name")
+    parser.add_argument('-d', '--db', required=True,help="topic name", default='edges')
     args = parser.parse_args()
 
     # Path to your .db3 file
     temp = os.getenv("VTRTEMP")
     pg = args.posegraph
-    db = "edges"
-    db_path = f"{temp}/pgs/{pg}/graph/{db}/{db}_0.db3"
+    db = args.db
+    if db == 'vertices' or db == 'edges':
+        db_path = f"{temp}/pgs/{pg}/graph/{db}/{db}_0.db3"
+    else:
+        db_path = f"{temp}/pgs/{pg}/graph/data/{db}/{db}_0.db3"
     print(db_path)
     poll_data = {}
 
@@ -81,27 +85,32 @@ if __name__ == "__main__":
 
     conn.close()
 
-    to_list = []
-    from_list = []
-    for _, row in poll_data['messages'].iterrows():
-        msg_type = get_message(poll_data["topics"]['type'].iloc[0])
-        msg_data = row['data']
-        msg = deserialize_message(msg_data, msg_type)
-        to_list.append(msg.to_id)
-        from_list.append(msg.from_id)
+    if db == 'edges':
+        to_list = []
+        from_list = []
+        for _, row in poll_data['messages'].iterrows():
+            msg_type = get_message(poll_data["topics"]['type'].iloc[0])
+            msg_data = row['data']
+            msg = deserialize_message(msg_data, msg_type)
+            to_list.append(msg.to_id)
+            from_list.append(msg.from_id)
 
-    to_set = set(to_list)
-    from_set = set(from_list)
+        to_set = set(to_list)
+        from_set = set(from_list)
 
-    analysis = find_graph_components(from_list, to_list)
+        analysis = find_graph_components(from_list, to_list)
 
-    print(f"Is fully connected?: {analysis['is_connected']}")
-    print(f"Total isolated groups: {analysis['total_components']}")
-    print(f"Groups breakdown: {analysis['components']}")
+        print(f"Is fully connected?: {analysis['is_connected']}")
+        print(f"Total isolated groups: {analysis['total_components']}")
+        print(f"Groups breakdown: {analysis['components']}")
 
-    for component in analysis['components']:
-        print(f"len {len(component)}")
-    # pdb.set_trace()
-    # plt.plot(to_list)
-    # plt.plot(from_list)
-    # plt.show()
+        for component in analysis['components']:
+            print(f"len {len(component)}")
+    elif db == 'pointmap_ptr':
+        ptrs = []
+        for _, row in poll_data['messages'].iterrows():
+            msg_type = get_message(poll_data["topics"]['type'].iloc[0])
+            msg_data = row['data']
+            msg = deserialize_message(msg_data, msg_type)
+            ptrs.append((msg.map_vid, msg.this_vid))
+            print(f"map_vid {msg.map_vid}, this_vid {msg.this_vid}")
