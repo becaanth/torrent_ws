@@ -363,8 +363,9 @@ class Deconstitutor:
                 logging.info(f"there were no chunk edges for this submap")
                 continue    
 
-            first_vtx = inspect_ros_data(chunk_vtxs.iloc[0])
-            if len(chunk_vtxs) < 5 and extract_minor_id(first_vtx == 0): # TODO: THIS IS A MAGIC NUMBER FOR BRANCHING
+            first_vtx = inspect_ros_data(chunk_vtxs.iloc[0])# first vtx in the branch
+            logging.info(f"first vtx: {first_vtx.id}")
+            if len(chunk_vtxs) < 5 and extract_minor_id(first_vtx.id == 0): # TODO: THIS IS A MAGIC NUMBER FOR BRANCHING
                 logging.info(f"only one vertex in this chunk - patch fix")
                 continue
 
