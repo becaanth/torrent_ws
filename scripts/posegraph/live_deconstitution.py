@@ -30,7 +30,7 @@ import pandas as pd
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from .posegraph_utils import *
+from posegraph_utils import *
 
 PIECE_SIZE = 2 * 1024 * 1024  # 2 MiB
 logger = logging.getLogger(__name__)
@@ -365,7 +365,7 @@ class Deconstitutor:
 
             first_vtx = inspect_ros_data(chunk_vtxs.iloc[0])# first vtx in the branch
             logging.info(f"first vtx: {first_vtx.id}")
-            if len(chunk_vtxs) < 5 and extract_minor_id(first_vtx.id == 0): # TODO: THIS IS A MAGIC NUMBER FOR BRANCHING
+            if len(chunk_vtxs) < 5 and extract_minor_id(first_vtx.id) == 0: # TODO: THIS IS A MAGIC NUMBER FOR BRANCHING
                 logging.info(f"only one vertex in this chunk - patch fix")
                 continue
 
