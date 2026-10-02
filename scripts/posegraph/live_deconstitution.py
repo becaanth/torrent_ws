@@ -363,7 +363,7 @@ class Deconstitutor:
                 logging.info(f"there were no chunk edges for this submap")
                 continue    
 
-            if len(chunk_vtxs) < 4: # TODO: THIS IS A MAGIC NUMBER
+            if len(chunk_vtxs) < 5: # TODO: THIS IS A MAGIC NUMBER
                 logging.info(f"only one vertex in this chunk - patch fix")
                 continue
 
