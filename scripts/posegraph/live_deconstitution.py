@@ -365,7 +365,7 @@ class Deconstitutor:
 
             first_vtx = inspect_ros_data(chunk_vtxs.iloc[0])# first vtx in the branch
             logging.info(f"first vtx: {first_vtx.id}")
-            if len(chunk_vtxs) < 5 and extract_minor_id(first_vtx.id) == 0: # TODO: THIS IS A MAGIC NUMBER FOR BRANCHING
+            if len(chunk_vtxs) < 5 and extract_minor_id(first_vtx.id) == 0: # TODO: THIS IS A MAGIC NUMBER FOR BRANCHING; DRIVE IN A STRAIGHT LINE @ BRANCH
                 logging.info(f"only one vertex in this chunk - patch fix")
                 continue
 
