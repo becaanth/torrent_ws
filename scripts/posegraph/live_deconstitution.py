@@ -322,6 +322,7 @@ class Deconstitutor:
             e_mask = from_mask | to_mask
             candidate_edges = np.where(e_mask)[0]
             sort_eidx   = np.argsort(self._from_ids[e_mask])
+            sort_eidx = sort_eidx[:-1] # skip egress edge
             candidate_chunk_edges = self._df['edges'].iloc[candidate_edges[sort_eidx]]
             chunk_edges = pd.DataFrame()
 
@@ -406,6 +407,14 @@ if __name__ == "__main__":
     output_dir = os.path.join(args.piece_root, f"{args.posegraph}_{robot_id}/{robot_id}")
     logging.info(f"ROBOT_ID : {robot_id}")
 
+    logging.basicConfig(
+            level=getattr(logging, "INFO"),
+            format="%(asctime)s [%(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            # handlers=handlers,
+            force=True,
+        )
+    
     dec = Deconstitutor(
         input_dir=input_dir,
         output_dir=output_dir,
