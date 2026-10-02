@@ -138,7 +138,6 @@ class Deconstitutor:
 
         # Which submap indices have already been written as output chunks
         self._written_chunks: set[int] = set()
-        self._in_progress_idx = np.uint64() - 1  # sentinel
 
         # track local submaps
         self._all_submaps_positions: list[int] = []
@@ -269,9 +268,6 @@ class Deconstitutor:
             else self._all_submaps_positions[-1]
         )
 
-        if self._in_progress_idx == np.uint64() - 1:
-            self._in_progress_idx = last_local_idx
-
         # exit if we've written this chunk before
         for i in self._all_submaps_positions:
             if i in self._written_chunks:
@@ -342,21 +338,21 @@ class Deconstitutor:
             ]
             chunk_edges = candidate_chunk_edges[is_manual_mask]
 
-            if i == last_local_idx:
-                # If this is the last submap, evaluate if it constitutes a merge
-                logging.info("this is the last submap")
-                
-                merges_to_remote = False
-                # Only inspect edges connected to this local submap TODO: figure out merging
-                # for fid, tid in zip(self._from_ids[e_mask], self._to_ids[e_mask]):
-                #     if (extract_robot_id(int(fid)) != self.robot_id) or \
-                #     (extract_robot_id(int(tid)) != self.robot_id):
-                #         merges_to_remote = True
-                #         break
-                        
-                if not merges_to_remote:
-                    logging.info("skipping, no merges to remote")
-                    continue
+            logging.info(f"sid: {sid}")
+            is_merge = False
+            # if from_id, to_id of last edge in chunk edges dont share robot, major id, then this is a merge
+            if not chunk_edges.empty:
+                last_edge = inspect_ros_data(chunk_edges.iloc[-1])
+                diff_robots = (extract_robot_id(last_edge.from_id) != extract_robot_id(last_edge.to_id))
+                diff_run = (extract_major_id(last_edge.from_id) != extract_major_id(last_edge.to_id))
+                print([print(f"from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).to_id}") for _, e in chunk_edges.iterrows()])
+                if diff_robots and diff_run:
+                    logging.info(f"merge detected from {last_edge.from_id} to {last_edge.to_id}")
+                    is_merge = True
+
+            if not is_merge:
+                logging.info("skipping, no merges to remote")
+                continue
 
             if len(chunk_edges) == 0:
                 # all data is autonomous, no candidate chunk edges were valid. this submap is done
@@ -368,10 +364,6 @@ class Deconstitutor:
             if len(chunk_vtxs) < 5 and extract_minor_id(first_vtx.id) == 0: # TODO: THIS IS A MAGIC NUMBER FOR BRANCHING; DRIVE IN A STRAIGHT LINE @ BRANCH
                 logging.info(f"only one vertex in this chunk - patch fix")
                 continue
-
-            # map still in progress, dont write
-            # if self._in_progress_idx == last_local_idx:
-            #     continue
 
             # --- write chunk ------------------------------------------------
             filename = f"{str(hex(int(sid)))[2:].zfill(16)}.db3"
