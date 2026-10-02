@@ -30,7 +30,7 @@ import pandas as pd
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from posegraph_utils import *
+from .posegraph_utils import *
 
 PIECE_SIZE = 2 * 1024 * 1024  # 2 MiB
 logger = logging.getLogger(__name__)
