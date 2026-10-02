@@ -30,7 +30,7 @@ import pandas as pd
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from .posegraph_utils import *
+from posegraph_utils import *
 
 PIECE_SIZE = 2 * 1024 * 1024  # 2 MiB
 logger = logging.getLogger(__name__)
@@ -339,20 +339,24 @@ class Deconstitutor:
             chunk_edges = candidate_chunk_edges[is_manual_mask]
 
             logging.info(f"sid: {sid}")
-            is_merge = False
-            # if from_id, to_id of last edge in chunk edges dont share robot, major id, then this is a merge
-            if not chunk_edges.empty:
-                last_edge = inspect_ros_data(chunk_edges.iloc[-1])
-                diff_robots = (extract_robot_id(last_edge.from_id) != extract_robot_id(last_edge.to_id))
-                diff_run = (extract_major_id(last_edge.from_id) != extract_major_id(last_edge.to_id))
-                print([print(f"from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).to_id}") for _, e in chunk_edges.iterrows()])
-                if diff_robots and diff_run:
-                    logging.info(f"merge detected from {last_edge.from_id} to {last_edge.to_id}")
-                    is_merge = True
+            if i == last_local_idx:
+                # If this is the last submap, evaluate if it constitutes a merge
+                logging.info("this is the last submap")
+                is_merge = False
 
-            if not is_merge:
-                logging.info("skipping, no merges to remote")
-                continue
+                # if from_id, to_id of last edge in chunk edges dont share robot, major id, then this is a merge
+                if not chunk_edges.empty:
+                    last_edge = inspect_ros_data(chunk_edges.iloc[-1])
+                    diff_robots = (extract_robot_id(last_edge.from_id) != extract_robot_id(last_edge.to_id))
+                    diff_run = (extract_major_id(last_edge.from_id) != extract_major_id(last_edge.to_id))
+                    print([print(f"from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).from_id}") for _, e in chunk_vtxs.iterrows()])
+                    if diff_robots and diff_run:
+                        logging.info(f"merge detected from {last_edge.from_id} to {last_edge.to_id} \n \n \n \n")
+                        is_merge = True
+
+                if not is_merge:
+                    logging.info("skipping, no merges to remote")
+                    continue
 
             if len(chunk_edges) == 0:
                 # all data is autonomous, no candidate chunk edges were valid. this submap is done
