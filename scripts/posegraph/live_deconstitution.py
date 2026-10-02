@@ -138,6 +138,7 @@ class Deconstitutor:
 
         # Which submap indices have already been written as output chunks
         self._written_chunks: set[int] = set()
+        self._in_progress_idx = np.uint64() - 1  # sentinel
 
         # track local submaps
         self._all_submaps_positions: list[int] = []
@@ -267,7 +268,11 @@ class Deconstitutor:
             if self._local_submaps_positions
             else self._all_submaps_positions[-1]
         )
-        
+
+        if self._in_progress_idx == np.uint64() - 1:
+            self._in_progress_idx = last_local_idx
+
+        # exit if we've written this chunk before
         for i in self._all_submaps_positions:
             if i in self._written_chunks:
                 continue
@@ -276,6 +281,7 @@ class Deconstitutor:
 
             # Rows in pointmap_ptr that belong to this submap
             ptr_row_idxs = np.where(self._map_vids == sid)[0]
+            # exit if there are no pointmap ptrs
             if len(ptr_row_idxs) == 0:
                 continue
 
@@ -286,11 +292,14 @@ class Deconstitutor:
             is_local = (extract_robot_id(sid) == self.robot_id) or any(
                 extract_robot_id(int(v)) == self.robot_id for v in relevant_vids
             )
+
+            # exit if this is not a local piece
             if not is_local:
                 logging.debug(f"  [chunk {i}] SKIP: submap {sid} has no local vertices") 
                 self._written_chunks.add(i)
                 continue
 
+            # exit if funny business
             if i >= len(self._df['pointmap']):
                 continue
             chunk_submap = self._df['pointmap'].iloc[[i]]
@@ -353,6 +362,14 @@ class Deconstitutor:
                 # all data is autonomous, no candidate chunk edges were valid. this submap is done
                 logging.info(f"there were no chunk edges for this submap")
                 continue    
+
+            if len(chunk_vtxs) == 1:
+                logging.info(f"only one vertex in this chunk - patch fix")
+                continue
+
+            # map still in progress, dont write
+            # if self._in_progress_idx == last_local_idx:
+            #     continue
 
             # --- write chunk ------------------------------------------------
             filename = f"{str(hex(int(sid)))[2:].zfill(16)}.db3"
