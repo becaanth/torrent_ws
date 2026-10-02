@@ -337,7 +337,11 @@ class Deconstitutor:
                 for _, row in candidate_chunk_edges.iterrows()
             ]
             chunk_edges = candidate_chunk_edges[is_manual_mask]
-
+            if len(chunk_edges) == 0:
+                # all data is autonomous, no candidate chunk edges were valid. this submap is done
+                logging.info(f"there were no chunk edges for this submap")
+                continue    
+            
             logging.info(f"sid: {sid}")
             if i == last_local_idx:
                 # If this is the last submap, evaluate if it constitutes a merge
@@ -357,11 +361,6 @@ class Deconstitutor:
                 if not is_merge:
                     logging.info("skipping, no merges to remote")
                     continue
-
-            if len(chunk_edges) == 0:
-                # all data is autonomous, no candidate chunk edges were valid. this submap is done
-                logging.info(f"there were no chunk edges for this submap")
-                continue    
 
             first_vtx = inspect_ros_data(chunk_vtxs.iloc[0])# first vtx in the branch
             logging.info(f"first vtx: {first_vtx.id}")
