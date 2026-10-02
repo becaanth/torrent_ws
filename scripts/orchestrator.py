@@ -96,7 +96,7 @@ class Orchestrator:
             this_robot_id=self.robot_id,
             robot_id=self.robot_id,
             state=state,
-            poll_hz=1/11,
+            poll_hz=1/7,
             t_ses=self.t_ses,
             t_lock=self.t_lock,
             my_ip=self.my_ip,
@@ -112,7 +112,7 @@ class Orchestrator:
             robot_id=robot_id,
             policy = self.policy,
             pol_param=self.pol_param,
-            poll_hz=1/7,
+            poll_hz=1/5,
             t_ses=self.t_ses,
             t_lock=self.t_lock,
             on_metadata_received=self.handle_metadata_received,
@@ -162,7 +162,7 @@ class Orchestrator:
     def handle_new_vertex(self, vertex_id):
         # localized to new vertex, pass to seeder to filter files in repeat (cb from tr_listener)
         logging.info(f"localized to {vertex_id}, telling seeder")
-        self.seeder.current_vtx = int(2**63) #vertex_id
+        self.seeder.current_vtx = int(2**63) #vertex_id TODO: disabled repeat filter for now
 
     def _spin_ros(self):
         """ Helper to spin ROS2 thread """
