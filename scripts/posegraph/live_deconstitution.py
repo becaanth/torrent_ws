@@ -368,7 +368,7 @@ class Deconstitutor:
                 # last_edge = inspect_ros_data(chunk_edges.iloc[-1])
                 # diff_robots = (extract_robot_id(last_edge.from_id) != extract_robot_id(last_edge.to_id))
                 # diff_run = (extract_major_id(last_edge.from_id) != extract_major_id(last_edge.to_id))
-                print([print(f"mode {inspect_ros_data(e).mode.mode} from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).to_id}") for _, e in chunk_edges.iterrows()])
+                logging.info([print(f"mode {inspect_ros_data(e).mode.mode} from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).to_id}") for _, e in chunk_edges.iterrows()])
                 if inspect_ros_data(chunk_edges.iloc[-1]).type.type == 1:
                     logging.info(f"merge detected \n \n \n \n")
                     is_merge = True
