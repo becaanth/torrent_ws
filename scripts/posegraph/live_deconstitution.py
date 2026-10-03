@@ -358,7 +358,7 @@ class Deconstitutor:
 
             logging.info(f"sid: {sid}")
             logging.info(f"i: {i} last_local_idx: {last_local_idx}")
-            if i == last_local_idx and len(chunk_edges) > 1:
+            if i == last_local_idx: # and len(chunk_edges) > 1:
                 # If this is the last submap, evaluate if it constitutes a merge (must have more than one edge, else branch triggers merge)
                 logging.info("this is the last submap")
                 is_merge = False
