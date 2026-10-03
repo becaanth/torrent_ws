@@ -30,7 +30,10 @@ import pandas as pd
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from .posegraph_utils import *
+from posegraph_utils import *
+
+import pdb
+
 
 PIECE_SIZE = 2 * 1024 * 1024  # 2 MiB
 logger = logging.getLogger(__name__)
@@ -244,8 +247,19 @@ class Deconstitutor:
             self._submap_ids = np.append(self._submap_ids, sid)
             idx = len(self._submap_ids) - 1
             self._all_submaps_positions.append(idx)
+            # save local submap idx
             if extract_robot_id(int(sid)) == self.robot_id:
-                self._local_submaps_positions.append(idx)
+                # check if this is a submap created in MANUAL/TEACH
+                # find sid vertex
+                v_idx = np.where(self._from_ids == sid)[0]
+                # get edge
+                if len(v_idx) > 0:
+                    edg = inspect_ros_data(self._df['edges'].iloc[v_idx[0]])
+                    if edg.mode.mode == 1:
+                        print(f'this submap {sid} was created in MANUAL')
+                        self._local_submaps_positions.append(idx)
+                    else:
+                        print(f'this submap {sid} was created in not in MANUAL')
 
     def _parse_pointmap_ptr(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
@@ -341,8 +355,9 @@ class Deconstitutor:
                 # all data is autonomous, no candidate chunk edges were valid. this submap is done
                 logging.info(f"there were no chunk edges for this submap")
                 continue    
-            
+
             logging.info(f"sid: {sid}")
+            logging.info(f"i: {i} last_local_idx: {last_local_idx}")
             if i == last_local_idx:
                 # If this is the last submap, evaluate if it constitutes a merge
                 logging.info("this is the last submap")
@@ -350,12 +365,13 @@ class Deconstitutor:
 
                 # if from_id, to_id of last edge in chunk edges dont share robot, major id, then this is a merge
                 # if not chunk_edges.empty:
-                last_edge = inspect_ros_data(chunk_edges.iloc[-1])
-                diff_robots = (extract_robot_id(last_edge.from_id) != extract_robot_id(last_edge.to_id))
-                diff_run = (extract_major_id(last_edge.from_id) != extract_major_id(last_edge.to_id))
-                print([print(f"from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).from_id}") for _, e in chunk_edges.iterrows()])
-                if diff_robots and diff_run:
-                    logging.info(f"merge detected from {last_edge.from_id} to {last_edge.to_id} \n \n \n \n")
+                # last_edge = inspect_ros_data(chunk_edges.iloc[-1])
+                # diff_robots = (extract_robot_id(last_edge.from_id) != extract_robot_id(last_edge.to_id))
+                # diff_run = (extract_major_id(last_edge.from_id) != extract_major_id(last_edge.to_id))
+                print([print(f"mode {inspect_ros_data(e).mode.mode} from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).to_id}") for _, e in chunk_edges.iterrows()])
+                pdb.set_trace()
+                if inspect_ros_data(chunk_edges.iloc[-1]).type.type == 1:
+                    logging.info(f"merge detected \n \n \n \n")
                     is_merge = True
 
                 if not is_merge:
