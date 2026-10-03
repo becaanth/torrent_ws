@@ -94,7 +94,7 @@ if __name__ == "__main__":
             msg = deserialize_message(msg_data, msg_type)
             to_list.append(msg.to_id)
             from_list.append(msg.from_id)
-            print(f"to: {msg.to_id}, from: {msg.from_id}")
+            print(f"mode: {msg.mode.mode} type: {msg.type.type} to: {msg.to_id}, from: {msg.from_id}")
 
         to_set = set(to_list)
         from_set = set(from_list)
