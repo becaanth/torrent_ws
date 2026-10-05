@@ -114,3 +114,12 @@ if __name__ == "__main__":
             msg = deserialize_message(msg_data, msg_type)
             ptrs.append((msg.map_vid, msg.this_vid))
             print(f"map_vid {msg.map_vid}, this_vid {msg.this_vid}")
+
+    elif db == 'pointmap':
+        pm = []
+        for _, row in poll_data['messages'].iterrows():
+            msg_type = get_message(poll_data["topics"]['type'].iloc[0])
+            msg_data = row['data']
+            msg = deserialize_message(msg_data, msg_type)
+            pm.append((msg.vertex_id))
+            print(f"pointmap vertex id {msg.vertex_id}")
