@@ -341,7 +341,7 @@ class Deconstitutor:
             e_mask = from_mask | to_mask
             candidate_edges = np.where(e_mask)[0]
             sort_eidx   = np.argsort(self._from_ids[e_mask])
-            sort_eidx = sort_eidx[:-1] # skip egress edge
+            # sort_eidx = np.where(sort_eidx!=np.max(sort_eidx))[0] # skip egress edge
             candidate_chunk_edges = self._df['edges'].iloc[candidate_edges[sort_eidx]]
             chunk_edges = pd.DataFrame()
 
@@ -354,6 +354,7 @@ class Deconstitutor:
             if len(chunk_edges) == 0:
                 # all data is autonomous, no candidate chunk edges were valid. this submap is done
                 logging.info(f"there were no chunk edges for this submap")
+                self._written_chunks.add(i)
                 continue    
 
             logging.info(f"sid: {sid}")
@@ -363,12 +364,8 @@ class Deconstitutor:
                 logging.info("this is the last submap")
                 is_merge = False
 
-                # if from_id, to_id of last edge in chunk edges dont share robot, major id, then this is a merge
-                # if not chunk_edges.empty:
-                # last_edge = inspect_ros_data(chunk_edges.iloc[-1])
-                # diff_robots = (extract_robot_id(last_edge.from_id) != extract_robot_id(last_edge.to_id))
-                # diff_run = (extract_major_id(last_edge.from_id) != extract_major_id(last_edge.to_id))
-                logging.info([print(f"mode {inspect_ros_data(e).mode.mode} from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).to_id}") for _, e in chunk_edges.iterrows()])
+                logging.info(f"{chunk_edges}")
+                logging.info([print(f"mode {inspect_ros_data(e).mode.mode} type {inspect_ros_data(e).type.type} from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).to_id}") for _, e in chunk_edges.iterrows()])
                 if inspect_ros_data(chunk_edges.iloc[-1]).type.type == 1:
                     logging.info(f"merge detected \n \n \n \n")
                     is_merge = True
@@ -376,6 +373,9 @@ class Deconstitutor:
                 if not is_merge:
                     logging.info("skipping, no merges to remote")
                     continue
+
+            else: # not a merge, pop egress edge
+                chunk_edges = chunk_edges.iloc[:-1]
 
             first_vtx = inspect_ros_data(chunk_vtxs.iloc[0])# first vtx in the branch
             logging.info(f"first vtx: {first_vtx.id}")
