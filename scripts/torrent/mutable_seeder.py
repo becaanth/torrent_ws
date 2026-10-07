@@ -246,11 +246,13 @@ class MutableSeeder:
         try:
             up_all_time = s.all_time_upload
             up_payload_rate = s.upload_payload_rate
+            down_payload_rate = s.download_payload_rate
             total_pieces = len(list(s.pieces))
 
             eval_string = (
                 f"Eval report for handle {info_hash}\n"
                 f" Throughput Up: {up_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
+                f" Throughput Down: {down_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
                 f" Total pieces: {total_pieces}"
                 )                        
             logging.info(eval_string)
