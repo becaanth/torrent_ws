@@ -169,7 +169,7 @@ class Orchestrator:
         # topology update, pass to reconstitutor (cb from mutable_peer)
         logging.info(f"handle_metadata_received for id {robot_id}")
         self.topology[robot_id] = topology
-        self.rec.update_topology(robot_id, topology)
+        # self.rec.update_topology(robot_id, topology)
 
     def handle_new_vertex(self, vertex_id):
         # localized to new vertex, pass to seeder to filter files in repeat (cb from tr_listener)
