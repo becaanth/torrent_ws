@@ -36,7 +36,8 @@ class Orchestrator:
         source_pg = f"{VTRTEMP}/pgs/{posegraph}/graph" # input posegraph to dec
         source_pc = f"{VTRTEMP}/pcs/{posegraph}_{robot_id}/{robot_id}" # output pieces
         rcv_pc = f"{VTRTEMP}/pcs/{posegraph}_{robot_id}" # received pieces
-        rcv_pg = f"{VTRTEMP}/pgs/{posegraph}/graph" # output posegraph from rec
+        # rcv_pg = f"{VTRTEMP}/pgs/{posegraph}/graph" # output posegraph from rec
+        rcv_pg = f"{VTRTEMP}/pgs/{posegraph}_test/graph" # output posegraph from rec
         
         self.robot_id = robot_id
         self.posegraph = posegraph
