@@ -122,11 +122,11 @@ class Orchestrator:
 
         # pieces -> posegraph
         self.topology = {}
-        # self.rec = Reconstitutor(
-        #     pieces_path=rcv_pc,
-        #     robot_id=self.robot_id,
-        #     output_dir=rcv_pg
-        # )
+        self.rec = Reconstitutor(
+            pieces_path=rcv_pc,
+            robot_id=self.robot_id,
+            output_dir=rcv_pg
+        )
 
         # listen to T&R
         if not rclpy.ok():
@@ -169,7 +169,7 @@ class Orchestrator:
         # topology update, pass to reconstitutor (cb from mutable_peer)
         logging.info(f"handle_metadata_received for id {robot_id}")
         self.topology[robot_id] = topology
-        # self.rec.update_topology(robot_id, topology)
+        self.rec.update_topology(robot_id, topology)
 
     def handle_new_vertex(self, vertex_id):
         # localized to new vertex, pass to seeder to filter files in repeat (cb from tr_listener)
@@ -190,7 +190,7 @@ class Orchestrator:
         self.threads["seeder"] = threading.Thread(target=self.seeder.run, daemon=True, name="SeederThread")
         self.threads["gossiper"] = threading.Thread(target=self.gossiper.run, daemon=True, name="GossiperThread")
         self.threads["peer"] = threading.Thread(target=self.peer.run, daemon=True, name="PeerThread")
-        # self.threads["rec"] =threading.Thread(target=self.rec.run, daemon=True,name="ReconstitutorThread")
+        self.threads["rec"] =threading.Thread(target=self.rec.run, daemon=True,name="ReconstitutorThread")
 
         self.threads["listener"] = threading.Thread(target = self._spin_ros, daemon=True, name="RepeatListenerThread")
         startup_threads = list(self.threads.values())
