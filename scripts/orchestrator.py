@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 import threading
+import time 
+import faulthandler
 
 from posegraph.live_deconstitution import Deconstitutor
 from posegraph.live_reconstitution import Reconstitutor
@@ -120,11 +122,11 @@ class Orchestrator:
 
         # pieces -> posegraph
         self.topology = {}
-        self.rec = Reconstitutor(
-            pieces_path=rcv_pc,
-            robot_id=self.robot_id,
-            output_dir=rcv_pg
-        )
+        # self.rec = Reconstitutor(
+        #     pieces_path=rcv_pc,
+        #     robot_id=self.robot_id,
+        #     output_dir=rcv_pg
+        # )
 
         # listen to T&R
         if not rclpy.ok():
@@ -133,7 +135,17 @@ class Orchestrator:
         self.current_vtx = 0 # what vertex is this current agent at?
         self.tr_listener = RobotStateListener(on_new_vertex=self.handle_new_vertex)
 
+        # self._fh = open(f"logs/fault_{robot_id}_{int(time.time())}.log", "w")
+        # threading.excepthook = lambda a: logging.critical(f"[THREAD DIED] {a.thread.name}",
+        # exc_info=(a.exc_type, a.exc_value, a.exc_traceback))   # thread deaths currently go to stderr only
+
         self.threads = {}
+
+    # def _tagged(name, fn): # wrap each thread target
+    #     def run():
+    #         logging.info(f"[THREAD] {name} ident={threading.get_ident():#x} lwp={threading.get_native_id()}")
+    #         fn()
+    #     return run
 
     # Callbacks
     def handle_new_item(self, robot_id, mutable_item):
@@ -178,7 +190,7 @@ class Orchestrator:
         self.threads["seeder"] = threading.Thread(target=self.seeder.run, daemon=True, name="SeederThread")
         self.threads["gossiper"] = threading.Thread(target=self.gossiper.run, daemon=True, name="GossiperThread")
         self.threads["peer"] = threading.Thread(target=self.peer.run, daemon=True, name="PeerThread")
-        self.threads["rec"] =threading.Thread(target=self.rec.run, daemon=True,name="ReconstitutorThread")
+        # self.threads["rec"] =threading.Thread(target=self.rec.run, daemon=True,name="ReconstitutorThread")
 
         self.threads["listener"] = threading.Thread(target = self._spin_ros, daemon=True, name="RepeatListenerThread")
         startup_threads = list(self.threads.values())
@@ -194,6 +206,7 @@ class Orchestrator:
                     break
                 for t in live_threads:
                     t.join(timeout=1.0)
+                # faulthandler.disable(); faulthandler.enable(file=self._fh, all_threads=True)
         except KeyboardInterrupt:
             logging.info("Interrupted, shutting down orchestrator")
         finally:
