@@ -149,11 +149,6 @@ class MutableSeeder:
                 logging.debug(f"  Has Metadata: {handle.has_metadata()}")
         
                 logging.info(f"Progress: {s.progress*100:.1f}% | Peers: {s.num_peers} | Down: {s.download_rate/1000:.1f} KB/s")
-            for a in self.t_ses.pop_alerts():
-                if isinstance(a, (lt.peer_connect_alert, lt.peer_disconnected_alert,
-                    lt.peer_error_alert, lt.listen_failed_alert,
-                    lt.listen_succeeded_alert, lt.incoming_connection_alert)):
-                    logging.info(f"[Seeder] alert: {a}")
 
         try:
             self.eval_trs()
@@ -245,6 +240,7 @@ class MutableSeeder:
 
         try:
             up_all_time = s.all_time_upload
+            down_all_time = s.all_time_download
             up_payload_rate = s.upload_payload_rate
             down_payload_rate = s.download_payload_rate
             total_pieces = len(list(s.pieces))
@@ -252,7 +248,7 @@ class MutableSeeder:
             eval_string = (
                 f"Eval report for handle {info_hash}\n"
                 f" Throughput Up: {up_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
-                f" Throughput Down: {down_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
+                f" Throughput Down: {down_payload_rate / 1e6:.2f} MB/s (Total: {down_all_time / 1e6:.2f} MB)\n"
                 f" Total pieces: {total_pieces}"
                 )                        
             logging.info(eval_string)
