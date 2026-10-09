@@ -14,10 +14,21 @@ logger = logging.getLogger(__name__)
 
 # general utils
 def inspect_ros_data(frame):
-    logging.info("SF: INSPECT ROS DATA")
-    msg = deserialize_message(frame.data, get_message(frame["topic_type"]))
-    logging.info("SF: INSPECT ROS DATA COMPLETE")
-    return msg
+    try:
+        return deserialize_message(frame.data, get_message(frame["topic_type"]))
+    except:
+        return None
+
+def read_id(vid):
+    vid = int(vid) # cast for type safety
+    robot_id = extract_robot_id(vid)
+    major_id = extract_major_id(vid)
+    minor_id = extract_minor_id(vid)
+    return (robot_id, major_id, minor_id)
+
+def pv(vid):
+    """wrapper; print human readable vid"""
+    print(read_id(vid))
 
 def pad_file_to_exact_size(path, target_size):
     # IMPORTANT: start AFTER sqlite connection is closed
@@ -41,7 +52,6 @@ def pad_file_to_exact_size(path, target_size):
     assert final_size == target_size, (
         f"padding failed: {final_size} != {target_size}"
     )
-
 
 # getters
 def get_db3_elements(bag_path, which_data):
@@ -125,7 +135,6 @@ def get_db3_elements(bag_path, which_data):
 
     conn.close()
     return res
-
 
 # writers
 def write_metadata_yaml(df, bag_dir, topic_name, topic_type, segment_num, partial):
