@@ -267,6 +267,11 @@ class Deconstitutor:
             self._this_vids = np.append(self._this_vids, np.uint64(msg.this_vid))
             self._map_vids  = np.append(self._map_vids,  np.uint64(msg.map_vid))
 
+    def _map_of(self, vid):
+        """map_vid from vertex `vid`'s pointmap_ptr row, or None if that row hasn't been read yet."""
+        rows = np.where(self._this_vids == np.uint64(vid))[0]   # np.uint64 keeps the compare exact for 64-bit ids
+        return int(self._map_vids[rows[-1]]) if len(rows) else None
+    
     def _write_new_chunks(self):
         """
         For each submap not yet written, check if we have enough data
@@ -372,20 +377,19 @@ class Deconstitutor:
                 egress_row = chunk_edges[chunk_edges['rowid']==max_rowid]
                 egress_edge = inspect_ros_data(egress_row.iloc[0])
 
-                to_this_idx = np.where(self._this_vids == egress_edge.to_id)[0][0]
-                from_this_idx = np.where(self._this_vids == egress_edge.from_id)[0][0]
-                logging.info(f"to idx {to_this_idx}, from idx {from_this_idx}")
-                if to_this_idx == None or from_this_idx == None:
-                    pass
-                
-                to_map_vid = self._map_vids[to_this_idx]
-                from_map_vid = self._map_vids[from_this_idx]
+                from_map_vid = self._map_of(egress_edge.from_id)
+                to_map_vid = self._map_of(egress_edge.to_id)
 
-                if from_map_vid == sid and to_map_vid != sid:
-                    is_complete = True  
+                if from_map_vid is None:
+                    pass                                    # from-vertex's pointmap_ptr not flushed yet: retry next poll
+                elif to_map_vid is not None:
+                    is_complete = from_map_vid != to_map_vid
+                elif (int(egress_edge.to_id) >> 16) != (int(egress_edge.from_id) >> 16):
+                    is_complete = True                      # to-vertex is on a sequence with no ptr rows here (e.g. other robot's map): merge
+                # else: to-vertex is on this sequence but its pointmap_ptr isn't flushed yet -> retry next poll
 
-                if egress_edge.type.type == 0:
-                    # not a merge, pop the egress edge
+                if is_complete and egress_edge.type.type == 0:
+                    # not a merge, drop the egress edge
                     chunk_edges = chunk_edges[chunk_edges['rowid'] != max_rowid]
 
                 if not is_complete:
