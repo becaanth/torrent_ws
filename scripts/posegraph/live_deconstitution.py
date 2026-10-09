@@ -30,7 +30,7 @@ import pandas as pd
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from .posegraph_utils import *
+from posegraph_utils import *
 
 import pdb
 
@@ -359,23 +359,35 @@ class Deconstitutor:
 
             logging.info(f"sid: {sid}")
             logging.info(f"i: {i} last_local_idx: {last_local_idx}")
-            if i == last_local_idx: # and len(chunk_edges) > 1:
+
+            if i == last_local_idx: 
                 # If this is the last submap, evaluate if it constitutes a merge (must have more than one edge, else branch triggers merge)
                 logging.info("this is the last submap")
-                is_merge = False
+                is_complete = False
 
                 logging.info(f"{chunk_edges}")
-                logging.info([print(f"mode {inspect_ros_data(e).mode.mode} type {inspect_ros_data(e).type.type} from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).to_id}") for _, e in chunk_edges.iterrows()])
-                if inspect_ros_data(chunk_edges.iloc[-1]).type.type == 1:
-                    logging.info(f"merge detected \n \n \n \n")
-                    is_merge = True
+                logging.info([print(f"{i}, mode {inspect_ros_data(e).mode.mode} type {inspect_ros_data(e).type.type} from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).to_id}") for _, e in chunk_edges.iterrows()])
+                # check if egress edge connects to a pointmap that is not this pointmap
+                max_rowid = max(chunk_edges['rowid'])
+                egress_row = chunk_edges[chunk_edges['rowid']==max_rowid]
+                egress_edge = inspect_ros_data(egress_row.iloc[0])
 
-                if not is_merge:
+                to_this_idx = np.where(self._this_vids == egress_edge.to_id)[0][0]
+                to_map_vid = self._map_vids[to_this_idx]
+
+                from_this_idx = np.where(self._this_vids == egress_edge.from_id)[0][0]
+                from_map_vid = self._map_vids[from_this_idx]
+
+                if from_map_vid == sid and to_map_vid != sid:
+                    is_complete = True  
+
+                if egress_edge.type.type == 0:
+                    # not a merge, pop the egress edge
+                    chunk_edges = chunk_edges[chunk_edges['rowid'] != max_rowid]
+                    
+                if not is_complete:
                     logging.info("skipping, no merges to remote")
                     continue
-
-            else: # not a merge, pop egress edge
-                chunk_edges = chunk_edges.iloc[:-1]
 
             first_vtx = inspect_ros_data(chunk_vtxs.iloc[0])# first vtx in the branch
             logging.info(f"first vtx: {first_vtx.id}")
