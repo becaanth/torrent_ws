@@ -30,7 +30,7 @@ import pandas as pd
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from posegraph_utils import *
+from .posegraph_utils import *
 
 import pdb
 
@@ -384,7 +384,7 @@ class Deconstitutor:
                 if egress_edge.type.type == 0:
                     # not a merge, pop the egress edge
                     chunk_edges = chunk_edges[chunk_edges['rowid'] != max_rowid]
-                    
+
                 if not is_complete:
                     logging.info("skipping, no merges to remote")
                     continue
