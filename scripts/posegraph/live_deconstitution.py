@@ -365,36 +365,64 @@ class Deconstitutor:
             logging.info(f"sid: {sid}")
             logging.info(f"i: {i} last_local_idx: {last_local_idx}")
 
-            if i == last_local_idx: 
-                # If this is the last submap, evaluate if it constitutes a merge (must have more than one edge, else branch triggers merge)
-                logging.info("this is the last submap")
-                is_complete = False
+            # if i == last_local_idx: 
+            #     # If this is the last submap, evaluate if it constitutes a merge (must have more than one edge, else branch triggers merge)
+            #     logging.info("this is the last submap")
+            #     is_complete = False
 
-                logging.info(f"{chunk_edges}")
-                logging.info([print(f"{i}, mode {inspect_ros_data(e).mode.mode} type {inspect_ros_data(e).type.type} from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).to_id}") for _, e in chunk_edges.iterrows()])
-                # check if egress edge connects to a pointmap that is not this pointmap
-                max_rowid = max(chunk_edges['rowid'])
-                egress_row = chunk_edges[chunk_edges['rowid']==max_rowid]
-                egress_edge = inspect_ros_data(egress_row.iloc[0])
+            #     logging.info(f"{chunk_edges}")
+            #     logging.info([print(f"{i}, mode {inspect_ros_data(e).mode.mode} type {inspect_ros_data(e).type.type} from {inspect_ros_data(e).from_id}, to {inspect_ros_data(e).to_id}") for _, e in chunk_edges.iterrows()])
+            #     # check if egress edge connects to a pointmap that is not this pointmap
+            #     max_rowid = max(chunk_edges['rowid'])
+            #     egress_row = chunk_edges[chunk_edges['rowid']==max_rowid]
+            #     egress_edge = inspect_ros_data(egress_row.iloc[0])
 
-                from_map_vid = self._map_of(egress_edge.from_id)
-                to_map_vid = self._map_of(egress_edge.to_id)
+            #     from_map_vid = self._map_of(egress_edge.from_id)
+            #     to_map_vid = self._map_of(egress_edge.to_id)
 
-                if from_map_vid is None:
-                    pass                                    # from-vertex's pointmap_ptr not flushed yet: retry next poll
-                elif to_map_vid is not None:
-                    is_complete = from_map_vid != to_map_vid
-                elif (int(egress_edge.to_id) >> 16) != (int(egress_edge.from_id) >> 16):
-                    is_complete = True                      # to-vertex is on a sequence with no ptr rows here (e.g. other robot's map): merge
-                # else: to-vertex is on this sequence but its pointmap_ptr isn't flushed yet -> retry next poll
+            #     if from_map_vid is None:
+            #         pass                                    # from-vertex's pointmap_ptr not flushed yet: retry next poll
+            #     elif to_map_vid is not None:
+            #         is_complete = from_map_vid != to_map_vid
+            #     elif (int(egress_edge.to_id) >> 16) != (int(egress_edge.from_id) >> 16):
+            #         is_complete = True                      # to-vertex is on a sequence with no ptr rows here (e.g. other robot's map): merge
+            #     # else: to-vertex is on this sequence but its pointmap_ptr isn't flushed yet -> retry next poll
 
-                if is_complete and egress_edge.type.type == 0:
-                    # not a merge, drop the egress edge
-                    chunk_edges = chunk_edges[chunk_edges['rowid'] != max_rowid]
+            #     if is_complete and egress_edge.type.type == 0:
+            #         # not a merge, drop the egress edge
+            #         chunk_edges = chunk_edges[chunk_edges['rowid'] != max_rowid]
 
-                if not is_complete:
-                    logging.info("skipping, no merges to remote")
+            # if not is_complete:
+            #     logging.info("skipping, no merges to remote")
+            #     continue
+
+            seq = sid >> 16                                    # robot + major: one teach sequence
+            members = {int(v) for v in relevant_vids}
+            last_v = max(v for v in members if (v >> 16) == seq)
+
+            egress_rowid, egress_type = None, None
+            for _, row in chunk_edges.iterrows():              # manual edges only
+                e = inspect_ros_data(row)
+                f, t = int(e.from_id), int(e.to_id)
+                if f != last_v or t in members:                # must leave this submap from its last vertex
                     continue
+                to_rows = np.where(self._this_vids == t)[0]
+                if len(to_rows):
+                    if int(self._map_vids[to_rows[-1]]) != sid:    # (a) next submap or (b) other sequence
+                        egress_rowid, egress_type = row['rowid'], e.type.type
+                        break
+                elif (t >> 16) != seq:                         # (b) merge onto a map we have no ptr rows for
+                    egress_rowid, egress_type = row['rowid'], e.type.type
+                    break
+                # else: to-vertex's ptr row not flushed yet -> wait, no crash
+
+            if egress_rowid is None:
+                continue                                       # robot still in this submap
+            if members.issuperset(range(sid, last_v + 1)) is False or len(chunk_vtxs) < (last_v - sid + 1):
+                continue                                       # left, but rows still arriving
+            if egress_type == 0:                               # successor: egress belongs to the next piece
+                chunk_edges = chunk_edges[chunk_edges['rowid'] != egress_rowid]
+            # merge (type 1): keep the merge edge in this piece
 
             first_vtx = inspect_ros_data(chunk_vtxs.iloc[0])# first vtx in the branch
             logging.info(f"first vtx: {first_vtx.id}")
