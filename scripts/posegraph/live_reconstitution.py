@@ -131,7 +131,7 @@ class Reconstitutor:
         with self._complete_lock:
             self._complete_files.add(os.path.realpath(path))
 
-    def is_complete(self, path: str) -> bool:
+    def _is_complete(self, path: str) -> bool:
         with self._complete_lock:
             return os.path.realpath(path) in self._complete_files
 
