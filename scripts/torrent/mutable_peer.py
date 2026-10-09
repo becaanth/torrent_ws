@@ -273,7 +273,6 @@ class MutablePeer:
         if ti is None:
             return
         rel_path = ti.files().file_path(file_idx)
-        logging.info(f"SF: rel_path: {rel_path}")
         self.on_file_completed(os.path.join(self.output_path, rel_path))
 
     def _remember_peer(self, peer_ip):

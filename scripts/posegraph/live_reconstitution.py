@@ -165,7 +165,7 @@ class Reconstitutor:
 
                 # decode topology from binary
                 pieces, idx = inspect_torrent(topo)
-                logging.info(f"[DIAG] inspect_torrent(r_id={r_id}) -> {len(pieces)} pieces, idx_present={idx is not None}")
+                logging.info(f"inspect_torrent(r_id={r_id}) -> {len(pieces)} pieces, idx_present={idx is not None}")
 
                 # if we havent written index before, write index
                 if idx is None:
@@ -193,7 +193,6 @@ class Reconstitutor:
                 if not getattr(piece, 'metadata_written', False):  # empty dict = not yet written
                     self._write_metadata(piece)
 
-        logging.info('SF: done writing all metadata')
         # look at pieces on disk (in pcs), to overwrite skeleton
         # go through local pieces
         if not os.path.exists(self.pieces_path):
@@ -434,7 +433,6 @@ class Reconstitutor:
             
             conn.execute("COMMIT;")
 
-        logging.info(f"[DIAG] _write_metadata wrote {len(new_vertices)} new verts, {len(new_edges)} new edges for vid={hex(piece.top_vertices[0].vertex_id)}")
         piece.metadata_written = True
         logging.info(f"_write_metadata: {piece.top_vertices[0].vertex_id}")
 
