@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 # general utils
 def inspect_ros_data(frame):
+    logging.info("SF: INSPECT ROS DATA")
     msg = deserialize_message(frame.data, get_message(frame["topic_type"]))
+    logging.info("SF: INSPECT ROS DATA COMPLETE")
     return msg
 
 def pad_file_to_exact_size(path, target_size):
