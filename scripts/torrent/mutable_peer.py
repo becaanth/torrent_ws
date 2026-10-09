@@ -130,7 +130,7 @@ class MutablePeer:
                     except Exception as e:
                         logging.info(f"file_idx alert corrupted: {e}")
                     # Execute picker update on that specific handle
-                    self.on_file_completed(handle)
+                    self._on_file_completed(handle)
                 
                 # connection/debug            
                 elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
@@ -301,7 +301,7 @@ class MutablePeer:
             return
 
         # update priorities imediately
-        self.on_file_completed(handle)
+        self._on_file_completed(handle)
         # find associated robot_id
         robot_id = None
         for rid, ih in self.known_infohash.items():
@@ -326,7 +326,7 @@ class MutablePeer:
         else:
             logging.info(f"metadata is None")
 
-    def on_file_completed(self, handle):
+    def _on_file_completed(self, handle):
         """
         Triggered when a file is completed downloading
         - reassign piece priorities for that handle according to the policy
