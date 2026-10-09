@@ -119,6 +119,7 @@ class Orchestrator:
             t_ses=self.t_ses,
             t_lock=self.t_lock,
             on_metadata_received=self.handle_metadata_received,
+            on_file_completed=self.handle_file_completed
         )
 
         # pieces -> posegraph
@@ -153,6 +154,10 @@ class Orchestrator:
         # a new robot announced a mutable item to gossiper, notify peer (cb from gossiper to peer)
         logging.info(f"handle_new_item from robot id {robot_id}")
         self.peer.join_torrent(robot_id, mutable_item['infohash'], mutable_item['my_ip'])
+
+    def handle_file_completed(self, path):
+        logging.info(f"handle file completed: {path}")
+        self.rec.mark_file_complete(path)
 
     def handle_snapshot_created(self, infohash):
         # seeder created a new snapshot (cb from seeder to gossiper)

@@ -18,7 +18,7 @@ class MutablePeer:
     Listen to gossip and join torrent sessions
     """
     def __init__(self, params : dict, posegraph : str, state : dict, robot_id, policy, pol_param, t_ses, t_lock, poll_hz : float = 0.2, 
-                on_metadata_received=None):
+                on_metadata_received=None, on_file_completed=None):
         
         # robot params
         self.container = params['container']
@@ -51,6 +51,7 @@ class MutablePeer:
 
         # inversion of control callbacks
         self.on_metadata_received = on_metadata_received   # pass to Reconstitutor
+        self.on_file_completed = on_file_completed   # pass to Reconstitutor
 
         # metrics
         self.len_metadata = 0
@@ -125,10 +126,11 @@ class MutablePeer:
                     try:
                         file_idx = alert.index # The file/piece index that completed
                         logging.info(f"file {file_idx} completed on torrent: {handle.info_hash()}")
-                    except:
-                        logging.info(f"file_idx alert corrupted")
+                        self._report_completed_file(handle, file_idx)
+                    except Exception as e:
+                        logging.info(f"file_idx alert corrupted: {e}")
                     # Execute picker update on that specific handle
-                    self._on_file_completed(handle)
+                    self.on_file_completed(handle)
                 
                 # connection/debug            
                 elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
@@ -262,6 +264,17 @@ class MutablePeer:
                 new_handle.connect_peer((ip, p))
         self.torrent_handles[robot_id] = new_handle
 
+    def _report_completed_file(self, handle, file_idx):
+        """tell Rec. the file is fully downloaded"""
+        if self.on_file_completed is None:
+            return
+
+        ti = handle.torrent_file()
+        if ti is None:
+            return
+        rel_path = ti.files().file_path(file_idx)
+        self.on_file_completed(os.path.join(self.output_path, rel_path))
+
     def _remember_peer(self, peer_ip):
         peer_endpoint = (peer_ip, PORT)
         if peer_endpoint not in self.peers:
@@ -287,7 +300,7 @@ class MutablePeer:
             return
 
         # update priorities imediately
-        self._on_file_completed(handle)
+        self.on_file_completed(handle)
         # find associated robot_id
         robot_id = None
         for rid, ih in self.known_infohash.items():
@@ -312,7 +325,7 @@ class MutablePeer:
         else:
             logging.info(f"metadata is None")
 
-    def _on_file_completed(self, handle):
+    def on_file_completed(self, handle):
         """
         Triggered when a file is completed downloading
         - reassign piece priorities for that handle according to the policy

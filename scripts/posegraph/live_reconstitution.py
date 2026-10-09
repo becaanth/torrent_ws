@@ -55,6 +55,9 @@ class Reconstitutor:
         self._topo_lock = threading.Lock()
         self.topology = {}
 
+        self._complete_lock = threading.Lock()
+        self._complete_files: set[str] = set()
+
         # topics we are writing to (+ pointmap_v0)
         self._db_relpaths = {
                 'vertices'     : f'{self.output_dir}/vertices/vertices_0.db3',
@@ -123,6 +126,15 @@ class Reconstitutor:
         with self._topo_lock:
             self.topology[str(robot_id)] = topology
 
+    def mark_file_complete(self, path: str):
+        """cb from peer on file_completed_alert"""
+        with self._complete_lock:
+            self._complete_files.add(os.path.realpath(path))
+
+    def is_complete(self, path: str) -> bool:
+        with self._complete_lock:
+            return os.path.realpath(path) in self._complete_files
+
     @contextlib.contextmanager
     def _open(self, key):
         """Short-lived connection, guaranteed to close even on error."""
@@ -181,6 +193,7 @@ class Reconstitutor:
                 if not getattr(piece, 'metadata_written', False):  # empty dict = not yet written
                     self._write_metadata(piece)
 
+        logging.info('SF: done writing all metadata')
         # look at pieces on disk (in pcs), to overwrite skeleton
         # go through local pieces
         if not os.path.exists(self.pieces_path):
@@ -206,6 +219,10 @@ class Reconstitutor:
 
                     target_piece = None
                     if folder_name != self.robot_id:
+                        # never open a file libtorrent is writing
+                        if not self._is_complete(os.path.join(robot_subfolder, db_file)):
+                            continue
+
                         if first_vid in self.pieces:
                             target_piece = self.pieces[first_vid]
                         else:
@@ -381,9 +398,6 @@ class Reconstitutor:
         Write skeleton rows for vertices and edges using topology from top_vertices/top_edges.
         data is NULL until the real piece arrives.
         """
-        # logging.info(f"_write_metadata for piece {piece}")
-        # if not piece.skeleton_rowids:
-        #     piece.skeleton_rowids = {'vertices': {}, 'edges': {}}
         rowids = self.global_skeleton_rowids
 
         new_vertices = [v for v in piece.top_vertices if v.vertex_id not in rowids['vertices']]
@@ -447,55 +461,59 @@ class Reconstitutor:
                 continue
             
             with self._open(k) as conn:
-                conn.execute("BEGIN;")
-                logging.info(f"opening {k}")                            
-                if k in skeleton_keys:
-                    rowid_map = self.global_skeleton_rowids[k]
-                    updates = []
-                    inserts = []
+                try:
+                    conn.execute("BEGIN;")
+                    logging.info(f"opening {k}")                            
+                    if k in skeleton_keys:
+                        rowid_map = self.global_skeleton_rowids[k]
+                        updates = []
+                        inserts = []
 
-                    for _, row in df.iterrows():
-                        ros_row = inspect_ros_data(row)
-                        # determine the key
-                        if k == 'vertices':
-                            row_key = int(ros_row.id)
-                        elif k == 'edges':
-                            row_key = (int(ros_row.from_id), int(ros_row.to_id))
-                        rid = rowid_map.get(row_key)
-                        if rid is None:
-                            logging.warning(
-                                f"no skeleton rowid for {k} key={row_key} in this piece "
-                                f"(vid={hex(piece.top_vertices[0].vertex_id)}) -- inserting fresh row "
-                                f"instead of dropping data"
-                            )
-                            inserts.append((row_key, int(row['timestamp']), rid))  
-                            continue
-                        updates.append((row['data'], int(row['timestamp']), rid))  
+                        for _, row in df.iterrows():
+                            ros_row = inspect_ros_data(row)
+                            # determine the key
+                            if k == 'vertices':
+                                row_key = int(ros_row.id)
+                            elif k == 'edges':
+                                row_key = (int(ros_row.from_id), int(ros_row.to_id))
+                            rid = rowid_map.get(row_key)
+                            if rid is None:
+                                logging.warning(
+                                    f"no skeleton rowid for {k} key={row_key} in this piece "
+                                    f"(vid={hex(piece.top_vertices[0].vertex_id)}) -- inserting fresh row "
+                                    f"instead of dropping data"
+                                )
+                                inserts.append((row_key, int(row['timestamp']), rid))  
+                                continue
+                            updates.append((row['data'], int(row['timestamp']), rid))  
 
-                    # Apply all updates to existing skeleton rows
-                    if updates:
-                        conn.executemany("UPDATE messages SET data = ?, timestamp = ? WHERE id = ?", updates)
+                        # Apply all updates to existing skeleton rows
+                        if updates:
+                            conn.executemany("UPDATE messages SET data = ?, timestamp = ? WHERE id = ?", updates)
 
-                    if inserts:
-                        for row_key, timestamp, data in inserts:
-                            cur = conn.execute("""
-                                INSERT INTO messages (topic_id, timestamp, data)
-                                VALUES (?, ?, ?)
-                            """, (self._last_rowid[k], timestamp, data))
-                            rowid_map[row_key] = cur.lastrowid
+                        if inserts:
+                            for row_key, timestamp, data in inserts:
+                                cur = conn.execute("""
+                                    INSERT INTO messages (topic_id, timestamp, data)
+                                    VALUES (?, ?, ?)
+                                """, (self._last_rowid[k], timestamp, data))
+                                rowid_map[row_key] = cur.lastrowid
 
-                else:
-                    conn.executemany("""
-                        INSERT INTO messages (topic_id, timestamp, data)
-                        VALUES (?, ?, ?)
-                    """,  [
-                        (self._last_rowid[k], int(row['timestamp']), row['data'])
-                        for _, row in df.iterrows()
-                    ])
+                    else:
+                        conn.executemany("""
+                            INSERT INTO messages (topic_id, timestamp, data)
+                            VALUES (?, ?, ?)
+                        """,  [
+                            (self._last_rowid[k], int(row['timestamp']), row['data'])
+                            for _, row in df.iterrows()
+                        ])
 
-                conn.execute("COMMIT;")
-                logging.info(f"_write_message: {piece.top_vertices[0].vertex_id}")
-                print(f"_write_message: {piece.top_vertices[0].vertex_id}")
+                    conn.execute("COMMIT;")
+                    logging.info(f"_write_message: {piece.top_vertices[0].vertex_id}")
+                    print(f"_write_message: {piece.top_vertices[0].vertex_id}")
+                except Exception as e:
+                    conn.execute("ROLLBACK;")
+                    logging.error(f"failed writing message batch for table {k}: {e}")
 
     def _write_index(self, index_msg):
         # write index.db3, containing MapInfo message
