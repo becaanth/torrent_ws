@@ -373,9 +373,12 @@ class Deconstitutor:
                 egress_edge = inspect_ros_data(egress_row.iloc[0])
 
                 to_this_idx = np.where(self._this_vids == egress_edge.to_id)[0][0]
-                to_map_vid = self._map_vids[to_this_idx]
-
                 from_this_idx = np.where(self._this_vids == egress_edge.from_id)[0][0]
+                logging.info(f"to idx {to_this_idx}, from idx {from_this_idx}")
+                if to_this_idx == None or from_this_idx == None:
+                    pass
+                
+                to_map_vid = self._map_vids[to_this_idx]
                 from_map_vid = self._map_vids[from_this_idx]
 
                 if from_map_vid == sid and to_map_vid != sid:
