@@ -94,15 +94,15 @@ if __name__ == "__main__":
             msg = deserialize_message(msg_data, msg_type)
             to_list.append(msg.to_id)
             from_list.append(msg.from_id)
-            print(f"mode: {msg.mode.mode} type: {msg.type.type} to: {msg.to_id}, from: {msg.from_id}")
+            print(f"mode: {msg.mode.mode} type: {msg.type.type} to: {read_id(msg.to_id)}, from: {read_id(msg.from_id)}")
 
         to_set = set(to_list)
         from_set = set(from_list)
 
         analysis = find_graph_components(from_list, to_list)
         print(f"Is fully connected?: {analysis['is_connected']}")
-        print(f"Total isolated groups: {analysis['total_components']}")
-        print(f"Groups breakdown: {analysis['components']}")
+        # print(f"Total isolated groups: {analysis['total_components']}")
+        # print(f"Groups breakdown: {analysis['components']}")
 
         for component in analysis['components']:
             print(f"len {len(component)}")
@@ -113,7 +113,7 @@ if __name__ == "__main__":
             msg_data = row['data']
             msg = deserialize_message(msg_data, msg_type)
             ptrs.append((msg.map_vid, msg.this_vid))
-            print(f"map_vid {msg.map_vid}, this_vid {msg.this_vid}")
+            print(f"map_vid {read_id(msg.map_vid)}, this_vid {read_id(msg.this_vid)}")
 
     elif db == 'pointmap':
         pm = []
@@ -122,4 +122,4 @@ if __name__ == "__main__":
             msg_data = row['data']
             msg = deserialize_message(msg_data, msg_type)
             pm.append((msg.vertex_id))
-            print(f"pointmap vertex id {msg.vertex_id}")
+            print(f"pointmap vertex id {read_id(msg.vertex_id)}, ts: {row.timestamp}")

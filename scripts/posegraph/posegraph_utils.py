@@ -24,11 +24,11 @@ def read_id(vid):
     robot_id = extract_robot_id(vid)
     major_id = extract_major_id(vid)
     minor_id = extract_minor_id(vid)
-    return (robot_id, major_id, minor_id)
+    return (robot_id, hex(major_id), minor_id)
 
 def pv(vid):
     """wrapper; print human readable vid"""
-    print(read_id(vid))
+    return read_id(vid)
 
 def pad_file_to_exact_size(path, target_size):
     # IMPORTANT: start AFTER sqlite connection is closed

@@ -55,6 +55,44 @@ def find_graph_components(from_list, to_list):
         "components": components
     }
 
+def debug_piece(db_path):
+    print('debug piece')
+    poll_data = {}
+    try:
+        conn = sqlite3.connect(db_path, isolation_level=None)
+        tables = ['vtr_index', 'env_info', 'waypoint_name', 'vertices', 'edges', 'pointmap', 'pointmap_ptr']
+        
+        for table in tables:
+            try:
+                df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
+                poll_data[table] = df
+            except Exception as e:
+                print(f"[ERROR] Failed reading table '{table}': {e}")
+                poll_data[table] = pd.DataFrame()
+        
+        conn.close()
+    except Exception as e:
+        print(f"[CRITICAL ERROR] Failed to connect/read database: {e}")
+        return
+
+    vertices = []
+    for _ , v in poll_data['vertices'].iterrows():
+        vertex = inspect_ros_data(v)
+        print(f"vertex: id {read_id(vertex.id)}")
+        vertices.append(vertices)
+
+    edges = []
+    for _ , e in poll_data['edges'].iterrows():
+        edge = inspect_ros_data(e)
+        print(f"edge: mode {edge.mode.mode},type {edge.type.type}, to {read_id(edge.to_id)}, from {read_id(edge.from_id)}")
+        edges.append(edge)
+
+    pointmap_ptrs = []
+    edges = []
+    for _ , p in poll_data['pointmap_ptr'].iterrows():
+        pointmap_ptr = inspect_ros_data(p)
+        print(f"pointmap_ptr: map_vid {read_id(pointmap_ptr.map_vid)}, this_vid {read_id(pointmap_ptr.this_vid)}")
+        pointmap_ptrs.append(pointmap_ptr)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Teach, Torrent, Repeat Agent")
@@ -71,35 +109,8 @@ if __name__ == "__main__":
     chunk_rid = extract_robot_id(int(chunk_str, 16))
 
     db_path = f"{temp}/pcs/{pg}_{rid}/{chunk_rid}/{chunk}.db3"
+    # db_path = f"temp/{chunk}.db3"
     print(db_path)
-    poll_data = {}
-    conn = sqlite3.connect(db_path, isolation_level=None)
-    tables = ['vtr_index','env_info','waypoint_name','vertices','edges','pointmap','pointmap_ptr']
-    for table in tables:
-        try:
-            df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
-            poll_data[table] = df
-        except Exception as e:
-            poll_data[table] = pd.DataFrame() 
-    conn.close()
-
-    vertices = []
-    for _ , v in poll_data['vertices'].iterrows():
-        vertex = inspect_ros_data(v)
-        print(f"vertex: id {vertex.id}")
-        vertices.append(vertices)
-
-    edges = []
-    for _ , e in poll_data['edges'].iterrows():
-        edge = inspect_ros_data(e)
-        print(f"edge: mode {edge.mode.mode},type {edge.type.type}, to {edge.to_id}, from {edge.from_id}")
-        edges.append(edge)
-
-    pointmap_ptrs = []
-    edges = []
-    for _ , p in poll_data['pointmap_ptr'].iterrows():
-        pointmap_ptr = inspect_ros_data(p)
-        print(f"pointmap_ptr: map_vid {pointmap_ptr.map_vid}, this_vid {pointmap_ptr.this_vid}")
-        pointmap_ptrs.append(pointmap_ptr)
+    debug_piece(db_path)
 
     
