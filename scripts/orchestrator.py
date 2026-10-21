@@ -166,7 +166,7 @@ class Orchestrator:
     def handle_new_vertex(self, vertex_id):
         # localized to new vertex, pass to seeder to filter files in repeat (cb from tr_listener)
         logging.info(f"localized to {vertex_id}, telling seeder")
-        self.seeder.current_vtx = int(2**63) #vertex_id TODO: disabled repeat filter for now
+        self.seeder.current_vtx = vertex_id #int(2**63) sentinel to disable repeat filter for now
 
     def _spin_ros(self):
         """ Helper to spin ROS2 thread """
