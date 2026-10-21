@@ -11,7 +11,7 @@ from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
 from .posegraph_utils import *
-from .torrent.torrent_utils import inspect_torrent
+from torrent.torrent_utils import inspect_torrent
 
 from vtr_pose_graph_msgs.msg import Vertex, Edge, EdgeType, EdgeMode
 from vtr_pose_graph_msgs.msg import Graph, MapInfo
