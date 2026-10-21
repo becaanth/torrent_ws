@@ -115,9 +115,15 @@ class MutableSeeder:
             self.start_flag = True
             self.prev_vtx = self.current_vtx
 
-            # create snapshot of pcs dir
+            # create snapshot of pcs dir``
             ti = self.create_snapshot()
             infohash = ti.info_hash()
+
+            # guard against duplicate snapshots (teacher is paused)
+            if self.current_handle is not None and self.current_handle.is_valid() and self.current_handle.info_hash() == infohash:
+                logging.info(f"snapshot unchanged ({infohash}), keeping current handle")
+                return
+
             with self.t_lock:
                 new_handle = self.t_ses.add_torrent({
                     "ti" : ti, 
