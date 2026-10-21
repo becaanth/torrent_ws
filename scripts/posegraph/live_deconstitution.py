@@ -31,7 +31,7 @@ from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 import zstandard as zstd
 
-from posegraph_utils import *
+from .posegraph_utils import *
 
 import pdb
 
