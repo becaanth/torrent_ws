@@ -10,16 +10,17 @@ import bisect # to search the skeleton
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from .posegraph_utils import *
+from posegraph_utils import *
 from torrent.torrent_utils import inspect_torrent
 
 from vtr_pose_graph_msgs.msg import Vertex, Edge, EdgeType, EdgeMode
 from vtr_pose_graph_msgs.msg import Graph, MapInfo
 from vtr_common_msgs.msg import LieGroupTransform
 
+import zstandard as zstd
+
 import contextlib
 import pdb
-import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,9 @@ class Reconstitutor:
             'vertices': {},  # vertex_id (int) -> sqlite rowid
             'edges': {}      # (from_id, to_id) (tuple) -> sqlite rowid
         }
+
+        # decompression
+        self.dctx = zstd.ZstdDecompressor()
 
     def run(self):
         logging.info(f"polling at {self.poll_hz} Hz  (Ctrl-C to stop)")
@@ -264,7 +268,6 @@ class Reconstitutor:
                     self.db_written.append(db_file)
                 except Exception as e:
                     logging.warning(f"{db_file} because {e}")
-                    traceback.print_exc()
                     continue
 
     def _parse_piece(self, folder_path: str, db_file: str):
@@ -328,11 +331,14 @@ class Reconstitutor:
         logging.info(f"Direct Local Ingestion Complete: {time.time() - s:.4f}s")
 
     def _ingest_remote_piece(self, poll_data: pd.DataFrame, piece: Piece):
+        pointmap = poll_data['pointmap'].copy()
+        pointmap['data'] = [self.dctx.decompress(bytes(b)) for b in pointmap['data']]
+
         # take poll_data, fill relevant Piece
         piece.vertices = poll_data['vertices']
         piece.edges = poll_data['edges']
-        piece.pointmap = poll_data['pointmap']
-        piece.pointmap_v0 = poll_data['pointmap']
+        piece.pointmap = pointmap
+        piece.pointmap_v0 = pointmap.copy
         piece.pointmap_ptr = poll_data['pointmap_ptr']
         piece.waypoint_name = poll_data['waypoint_name']
         piece.vtr_index = poll_data['vtr_index']
@@ -553,8 +559,9 @@ if __name__ == "__main__":
     posegraph = args.posegraph
     robot_id = os.getenv("ROBOT_ID")
 
-    output_dir = os.path.join(args.posegraph_root, f"{posegraph}", 'graph')
+    output_dir = os.path.join(args.posegraph_root, posegraph, 'graph')
     piece_path = os.path.join(args.piece_root, args.posegraph)
+    os.makedirs(piece_path, exist_ok=True)
 
     logging.info(f'output_dir: {output_dir}')
     print(f'output_dir: {output_dir}')

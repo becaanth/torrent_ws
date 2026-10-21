@@ -29,13 +29,14 @@ import numpy as np
 import pandas as pd
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
+import zstandard as zstd
 
-from .posegraph_utils import *
+from posegraph_utils import *
 
 import pdb
 
 
-PIECE_SIZE = 2 * 1024 * 1024  # 2 MiB
+PIECE_SIZE = int(1.2 * 1024 * 1024)  # 1 MiB
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -149,6 +150,9 @@ class Deconstitutor:
         # index df read lazily on first successful connection
         self._index_df: pd.DataFrame | None = None
 
+        # compression
+        self.cctx = zstd.ZstdCompressor(level=3)
+
         logging.info(f"initialized with IP {self.input_dir} OP: {self.output_dir}")
 
     def _get_conn(self, key: str) -> sqlite3.Connection | None:
@@ -256,10 +260,7 @@ class Deconstitutor:
                 if len(v_idx) > 0:
                     edg = inspect_ros_data(self._df['edges'].iloc[v_idx[0]])
                     if edg.mode.mode == 1:
-                        print(f'this submap {sid} was created in MANUAL')
                         self._local_submaps_positions.append(idx)
-                    else:
-                        print(f'this submap {sid} was created in not in MANUAL')
 
     def _parse_pointmap_ptr(self, new_rows: pd.DataFrame):
         for _, row in new_rows.iterrows():
@@ -317,7 +318,11 @@ class Deconstitutor:
             # exit if funny business
             if i >= len(self._df['pointmap']):
                 continue
-            chunk_submap = self._df['pointmap'].iloc[[i]]
+            chunk_submap = self._df['pointmap'].iloc[[i]]            
+            # compress pointmap with zstandard
+            compressed_submap = chunk_submap.copy()
+            raw = chunk_submap['data'].iloc[0]
+            compressed_submap.at[compressed_submap.index[0], 'data'] = self.cctx.compress(bytes(raw))
 
             # pointmap_ptr rows
             chunk_submap_ptrs = self._df['pointmap_ptr'].iloc[ptr_row_idxs]
@@ -414,7 +419,7 @@ class Deconstitutor:
             _drop_rowid(chunk_edges).to_sql('edges', conn, if_exists='replace', index=False)
             _drop_rowid(chunk_env_info).to_sql('env_info', conn, if_exists='replace', index=False)
             _drop_rowid(chunk_waypoints).to_sql('waypoint_name', conn, if_exists='replace', index=False)
-            _drop_rowid(chunk_submap).to_sql('pointmap', conn, if_exists='replace', index=False)
+            _drop_rowid(compressed_submap).to_sql('pointmap', conn, if_exists='replace', index=False)
             _drop_rowid(chunk_submap_ptrs).to_sql('pointmap_ptr', conn, if_exists='replace', index=False)
             conn.close()
 

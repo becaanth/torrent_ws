@@ -33,6 +33,7 @@ def pv(vid):
 def pad_file_to_exact_size(path, target_size):
     # IMPORTANT: start AFTER sqlite connection is closed
     current_size = os.path.getsize(path)
+    print(f'current_size: {current_size / (1024*1024)}')
 
     if current_size > target_size:
         raise RuntimeError(
@@ -45,7 +46,7 @@ def pad_file_to_exact_size(path, target_size):
         return
 
     with open(path, "ab") as f:
-        f.write(b"\x00" * missing)
+        f.write(b"\x00" * int(missing))
 
     # sanity check
     final_size = os.path.getsize(path)
