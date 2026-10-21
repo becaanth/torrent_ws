@@ -1,6 +1,5 @@
 import logging
 import libtorrent as lt
-from nacl.signing import SigningKey
 import rclpy
 import argparse
 import json
@@ -37,7 +36,6 @@ class Orchestrator:
         source_pc = f"{VTRTEMP}/pcs/{posegraph}_{robot_id}/{robot_id}" # output pieces
         rcv_pc = f"{VTRTEMP}/pcs/{posegraph}_{robot_id}" # received pieces
         rcv_pg = f"{VTRTEMP}/pgs/{posegraph}/graph" # output posegraph from rec
-        # rcv_pg = f"{VTRTEMP}/pgs/{posegraph}_test/graph" # output posegraph from rec
         
         self.robot_id = robot_id
         self.posegraph = posegraph
@@ -82,9 +80,8 @@ class Orchestrator:
         self.my_ip = self.gossiper.my_ip
 
         # authoritative infohash for this seeder
-        sk = SigningKey(bytes.fromhex(self.state["sk"]))
         self.mi = {
-            'pubkey': sk.verify_key.encode(),
+            'pubkey': 0,
             'robot_id': self.robot_id,
             'seq': self.state['seq'],
             'infohash': -1,
@@ -136,18 +133,7 @@ class Orchestrator:
 
         self.current_vtx = 0 # what vertex is this current agent at?
         self.tr_listener = RobotStateListener(on_new_vertex=self.handle_new_vertex)
-
-        # self._fh = open(f"logs/fault_{robot_id}_{int(time.time())}.log", "w")
-        # threading.excepthook = lambda a: logging.critical(f"[THREAD DIED] {a.thread.name}",
-        # exc_info=(a.exc_type, a.exc_value, a.exc_traceback))   # thread deaths currently go to stderr only
-
         self.threads = {}
-
-    # def _tagged(name, fn): # wrap each thread target
-    #     def run():
-    #         logging.info(f"[THREAD] {name} ident={threading.get_ident():#x} lwp={threading.get_native_id()}")
-    #         fn()
-    #     return run
 
     # Callbacks
     def handle_new_item(self, robot_id, mutable_item):
