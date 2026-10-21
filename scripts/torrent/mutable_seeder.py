@@ -14,7 +14,7 @@ from .torrent_utils import *
 # zenohd --cfg 'scouting/multicast/enabled:false'
 
 PORT=5204
-PIECE_SIZE = int(1.2 * 1024 * 1024)  # 2 MiB
+PIECE_SIZE = 2 * 1024 * 1024  # 1.2 MiB
 logger = logging.getLogger(__name__)
 
 class MutableSeeder:

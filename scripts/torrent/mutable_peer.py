@@ -343,7 +343,7 @@ class MutablePeer:
             lt_priorities = filtered_priorities.astype(int).tolist()
             check = handle.get_piece_priorities() # pieces same as files
             logging.info(f"priorities: \n{check}")
-            handle.prioritize_files(lt_priorities)
+            handle.prioritize_pieces(lt_priorities)
 
 # ======================================================
 
