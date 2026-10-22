@@ -175,8 +175,11 @@ class Reconstitutor:
                 if idx is None:
                     logging.info("inspect_torrent: idx is None")
                 if not self._index_written and idx is not None: # write MapInfo (from remote)
-                    self._write_index(idx)
-                    self._index_written = True    
+                    try:
+                        self._write_index(idx)
+                        self._index_written = True
+                    except Exception:
+                        logging.exception(f"could not write index from robot {r_id}; retrying next poll")  
 
                 # iterate through all of the pieces
                 for piece in pieces:

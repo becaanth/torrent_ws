@@ -89,6 +89,8 @@ def inspect_torrent(encoded_info):
     # guard MapInfo
     try:
         idx = msgpack.unpackb(info[b'files'][0][b'x-idx'], raw=False)
+        if isinstance(idx, dict) and "idx" in idx:      # seeder writes {"idx": {...}}
+            idx = idx["idx"]
     except Exception:
         return [], None
 
