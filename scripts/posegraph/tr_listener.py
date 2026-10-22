@@ -16,7 +16,7 @@ class RobotStateListener(Node):
         super().__init__('robot_state_listener')
         self.on_new_vertex = on_new_vertex
         self.robot_name = os.getenv("ROBOT_NAME")
-        print(f"ROBOT_NAME: {self.robot_name}")
+        logging.debug(f"ROBOT_NAME: {self.robot_name}")
         
         self.robot_state_sub = self.create_subscription(
             RobotState, 
