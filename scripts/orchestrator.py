@@ -112,7 +112,7 @@ class Orchestrator:
             robot_id=robot_id,
             policy = self.policy,
             pol_param=self.pol_param,
-            poll_hz=1/7,
+            poll_hz=1/5,
             t_ses=self.t_ses,
             t_lock=self.t_lock,
             on_metadata_received=self.handle_metadata_received,
