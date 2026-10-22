@@ -23,7 +23,7 @@ case "$POLICY" in
   *) echo "unknown policy '$POLICY'" >&2; echo "$USAGE" >&2; exit 1 ;;
 esac
 
-CONTAINER=vtr                                          # <-- your container name
+CONTAINER=vtr3_ttr                                     # <-- your container name
 SCRIPTS=/home/indro/ASRL/vtr3/torrent_ws/scripts       # path INSIDE the container
 
 case "$ROLE" in
