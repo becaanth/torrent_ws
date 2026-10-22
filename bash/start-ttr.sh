@@ -42,13 +42,16 @@ fi
 #
 #    - kill-server: fresh tmux server each launch, so panes never inherit a stale
 #      environment from an old server. Kills ANY tmux session in this container.
-#    - default-size: a detached session has no terminal, so tmux uses 80x24, which is
+#    - COLUMNS/LINES: tmuxp creates the session at the size of the terminal it runs in
+#      (shutil.get_terminal_size). With no terminal that falls back to 80x24, which is
 #      too small to split the 4-pane vtr_gui window ("no space for new pane").
+#      get_terminal_size reads COLUMNS/LINES first, so setting them gives a 250x60 session.
+#    - default-size: same size for any session tmux itself creates without a client.
 #    - \$HOME is expanded inside the container (root -> /root).
 docker exec -e TTR_POSEGRAPH="$PG" -e TTR_POLICY="$POLICY" "$CONTAINER" entrypoint.sh bash -c "
   tmux kill-server 2>/dev/null || true
   grep -qs 'default-size' \$HOME/.tmux.conf || echo 'set -g default-size 250x60' >> \$HOME/.tmux.conf
-  tmuxp load -d \$HOME/ASRL/vtr3/torrent_ws/scripts/$YAML_NAME
+  COLUMNS=250 LINES=60 tmuxp load -d \$HOME/ASRL/vtr3/torrent_ws/scripts/$YAML_NAME
 "
 
 echo "started $ROLE session 'ttr' in container '$CONTAINER' with posegraph '$PG', policy '$POLICY'"
