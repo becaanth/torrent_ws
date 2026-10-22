@@ -514,7 +514,6 @@ class Reconstitutor:
 
                     conn.execute("COMMIT;")
                     logging.info(f"_write_message: {piece.top_vertices[0].vertex_id}")
-                    print(f"_write_message: {piece.top_vertices[0].vertex_id}")
                 except Exception as e:
                     conn.execute("ROLLBACK;")
                     logging.error(f"failed writing message batch for table {k}: {e}")
@@ -563,8 +562,7 @@ if __name__ == "__main__":
     piece_path = os.path.join(args.piece_root, args.posegraph)
     os.makedirs(piece_path, exist_ok=True)
 
-    logging.info(f'output_dir: {output_dir}')
-    print(f'output_dir: {output_dir}')
+    logging.debug(f'output_dir: {output_dir}')
     rec = Reconstitutor(
         pieces_path=piece_path,
         robot_id=robot_id,

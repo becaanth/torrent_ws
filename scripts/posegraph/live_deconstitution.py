@@ -36,7 +36,7 @@ from .posegraph_utils import *
 import pdb
 
 
-PIECE_SIZE = int(1.2 * 1024 * 1024)  # 1 MiB
+PIECE_SIZE = int(1.2 * 1024 * 1024)  # 1.2 MiB
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
