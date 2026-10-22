@@ -45,7 +45,7 @@ windows:
       - source ~/ASRL/vtr3/torrent_ws/install/setup.bash
       - cd ~/ASRL/vtr3/torrent_ws/scripts
     panes:
-      - bash wait_for_vtr.sh && python3 orchestrator.py -p $TTR_POSEGRAPH -r $TTR_POLICY
+      - python3 orchestrator.py -p $TTR_POSEGRAPH -r $TTR_POLICY
 
   # ---- 3. Torrent planner: waits for VTR, then starts -----------------------
   - window_name: torrent_planner
