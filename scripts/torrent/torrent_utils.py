@@ -5,6 +5,9 @@ import msgpack
 import libtorrent as lt
 import zenoh
 from posegraph.posegraph_utils import *
+from .topo_codec import unpack_topology, file_id_from_name
+
+logger = logging.getLogger(__name__)
 
 # DEVICE CONFIGS
 ROBOT_IPS = {
@@ -29,7 +32,7 @@ def load_state(state_file): # TODO
     if os.path.exists(state_file):
         with open(state_file, "r") as f:
             return json.load(f)
-    print(f"[load_state] couldn't load state")
+    logging.debug(f"[load_state] couldn't load state")
     return None
 
 def save_state(state, state_file): # TODO
@@ -37,11 +40,11 @@ def save_state(state, state_file): # TODO
         json.dump(state, f)
 
 def drain_alerts(ses, timeout=10):
-    print('drain alerts')
+    logging.debug('drain alerts')
     end = time.time() + timeout
     while time.time() < end:
         for a in ses.pop_alerts():
-            print(a)
+            logging.debug(a)
         time.sleep(0.2)
 
 def sqlite_file_filter(file_path: str, current_vertex_id: int) -> bool:
@@ -54,7 +57,7 @@ def filter_in_progress_files(file_path: str) -> bool:
     
     # Filter out SQLite write-ahead logs and rollback journals
     if filename.endswith('.db3-wal') or filename.endswith('.db3-journal'):
-        print(f"Skipping temporary SQLite file: {filename}")
+        logging.debug(f"Skipping temporary SQLite file: {filename}")
         return False
 
     return True
@@ -64,13 +67,13 @@ def filter_repeat_files(file_path: str, current_vertex_id: int) -> bool:
     # get filename as hex
     base_name = os.path.basename(file_path)
     hex_str, _ = os.path.splitext(base_name)
-    print(f"file_path {file_path}, hex_str {hex_str}, current_vtx {current_vertex_id}")
+    logging.debug(f"file_path {file_path}, hex_str {hex_str}, current_vtx {current_vertex_id}")
     try:
         hex_val = int(hex_str, 16)
     except ValueError:
-        print("ValueError")
+        logging.debug("ValueError")
         return False
-    print(f"hex_val {hex_val}")
+    logging.debug(f"hex_val {hex_val}")
 
     # TODO: we only want to filter by run id, but for now, with only one run id per robot, we can just filter by magnitude
     return current_vertex_id >= hex_val
@@ -81,40 +84,27 @@ def mutable_to_string(mutable_item):
 # inspection
 def inspect_torrent(encoded_info):
     info = lt.bdecode(encoded_info)
+    files = info.get(b"files", [])
     
-    pieces : list[Piece] = []
     # guard MapInfo
     try:
         idx = msgpack.unpackb(info[b'files'][0][b'x-idx'], raw=False)
-    except:
-        idx = None
-        return 
-    
-    for file_entry in info.get(b"files", []):
-        extras = {
-            k.decode(): v
-            for k, v in file_entry.items()
-            if k not in {b"length", b"path", b"attr", b"path.utf-8"}
-        }
-        if extras:
+    except Exception:
+        return [], None
+
+    pieces : list[Piece] = []    
+    for file_entry in files:
+        if b"x-topo" in file_entry:                      # compact format
+            raw_vertices, raw_edges = unpack_topology(file_entry[b"x-topo"], file_id_from_name(file_entry[b"path"][-1]))
+        elif b"x-vertices" in file_entry:                # robots still on the old seeder
             raw_vertices = msgpack.unpackb(file_entry[b"x-vertices"], raw=False)
-            raw_edges    = msgpack.unpackb(file_entry[b"x-edges"],    raw=False)
-
-            # package into classes
-            vertices, edges = [],[]
-            for raw_vertex in raw_vertices:
-                vertices.append(Vertex(vertex_id=raw_vertex['id']))
-            for raw_edge in raw_edges:
-                edges.append(Edge(
-                    from_id=raw_edge['from'],
-                    to_id=raw_edge['to'],
-                    mode=raw_edge['mode'],
-                    type=raw_edge['type'],
-                    xi=raw_edge['xi'],
-                ))
-            pieces.append(Piece(top_vertices=vertices, top_edges=edges, metadata_written=False, data_ingested=False))
-
-    return pieces, idx['idx']
+            raw_edges = msgpack.unpackb(file_entry[b"x-edges"], raw=False)
+        else:
+            continue                                     # pad file, or a file the seeder couldn't annotate
+        vertices = [Vertex(vertex_id=v["id"]) for v in raw_vertices]
+        edges = [Edge(from_id=e["from"], to_id=e["to"], mode=e["mode"], type=e["type"], xi=e["xi"]) for e in raw_edges]
+        pieces.append(Piece(top_vertices=vertices, top_edges=edges, metadata_written=False, data_ingested=False))
+    return pieces, idx
 
 def on_mutable_item(sample):
     # Update mutable item
@@ -164,5 +154,5 @@ def unpack_device(params: dict, robot_id, zenoh_port):
     else:
         raise ValueError(f"[unpack_device] Invalid device parameter: {d}")
 
-    print(f"[unpack] Role: PEER | My IP: {my_ip} | Listening: tcp/0.0.0.0:{zenoh_port}")
+    logging.debug(f"[unpack] Role: PEER | My IP: {my_ip} | Listening: tcp/0.0.0.0:{zenoh_port}")
     return my_ip, cfg

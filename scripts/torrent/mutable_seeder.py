@@ -10,6 +10,7 @@ import csv
 
 from posegraph.posegraph_utils import *
 from .torrent_utils import *
+from .topo_codec import pack_topology, file_id_from_name
 
 # zenohd --cfg 'scouting/multicast/enabled:false'
 
@@ -212,12 +213,12 @@ class MutableSeeder:
                     wrote_idx = True
 
                 vertices, edges = parse_chunk(f"{self.input_path}/{filename}")
-                file_entry[b"x-vertices"] = msgpack.packb(
-                    [vertex_to_dict(v) for v in vertices], use_bin_type=True
-                )
-                file_entry[b"x-edges"] = msgpack.packb(
-                    [edge_to_dict(e) for e in edges], use_bin_type=True
-                )
+                try:
+                    file_entry[b"x-topo"] = pack_topology(vertices, edges, file_id_from_name(filename))
+                except ValueError as e:
+                    logging.warning(f"x-topo does not fit {filename} ({e}); using legacy annotations")
+                    file_entry[b"x-vertices"] = msgpack.packb([vertex_to_dict(v) for v in vertices], use_bin_type=True)
+                    file_entry[b"x-edges"] = msgpack.packb([edge_to_dict(e) for e in edges], use_bin_type=True)
             except Exception as e:
                 logging.error(f"snapshot ERROR parsing chunk {filename}: {e}. Skipping annotations for this file.")
                 continue

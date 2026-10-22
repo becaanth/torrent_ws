@@ -80,28 +80,28 @@ class MutablePeer:
         run the main loop
         """
         logging.info(f"running the main loop (Ctrl-C to stop)")
-        
-        sleep_duration = 1.0 / self.poll_hz     
-        last_sample_time = time.time()        
+        reconnect_period = 1.0 / self.poll_hz
+        last_sample_time = last_reconnect = time.time()
         try:
             while True:
-                # These run every tick (at poll_hz)
+                self.t_ses.wait_for_alert(500)   # ms; returns early as soon as an alert is queued
                 self._process_alerts()
-                self._reconnect_known_peers()
-                
+ 
                 current_time = time.time()
+                if current_time - last_reconnect >= reconnect_period:
+                    self._reconnect_known_peers()
+                    last_reconnect = current_time
+ 
                 if current_time - last_sample_time >= 1.0:
                     try:
                         self._eval_trs()
                     except Exception as e:
                         logging.info(f"couldnt eval_trs because of {e}")
-
+ 
                     last_sample_time = current_time # Reset the timer
-                
-                time.sleep(sleep_duration)
         except KeyboardInterrupt:
             logging.info("\nstopped")
-
+ 
     def _is_current(self, handle):
         """
         True only if this handle is still the live torrent for some robot.
