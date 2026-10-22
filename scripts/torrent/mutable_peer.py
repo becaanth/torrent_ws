@@ -102,39 +102,67 @@ class MutablePeer:
         except KeyboardInterrupt:
             logging.info("\nstopped")
 
+    def _is_current(self, handle):
+        """
+        True only if this handle is still the live torrent for some robot.
+        update_torrent() replaces a robot's torrent whenever it gossips a new snapshot, and
+        libtorrent removes the old one asynchronously on its own thread: alerts already
+        queued for the old torrent keep arriving, and is_valid() can flip to False between
+        any two calls on its handle (t_lock cannot prevent that).
+        """
+        try:
+            if not handle.is_valid():
+                return False
+            with self.t_lock:
+                current = list(self.torrent_handles.values())
+            return any(handle == h for h in current)
+        except RuntimeError:
+            return False
+
     def _process_alerts(self):
-        # Monitor existing torrents
+        # pop under the lock, then release it: the seeder and gossiper share t_lock
         with self.t_lock:
             alerts = self.t_ses.pop_alerts()
-        
-            for alert in alerts:
-                # received metadata
-                logging.info(alert)
-                if isinstance(alert, lt.metadata_received_alert):
-                    handle = alert.handle  # Direct handle reference attached to the alert!
-                    if not handle.is_valid():
-                        continue
-                    logging.info(f"metadata received for torrent: {handle.info_hash()}")
-                    self._handle_metadata_completion(handle)
-                    handle.unset_flags(lt.torrent_flags.upload_mode)  # now allow downloading
 
-                # piece/file completed
-                elif isinstance(alert, lt.file_completed_alert):
-                    handle = alert.handle  # Direct handle reference!
-                    if not handle.is_valid():
-                        continue
-                    try:
-                        file_idx = alert.index # The file/piece index that completed
-                        logging.info(f"file {file_idx} completed on torrent: {handle.info_hash()}")
-                        self._report_completed_file(handle, file_idx)
-                    except Exception as e:
-                        logging.info(f"file_idx alert corrupted: {e}")
-                    # Execute picker update on that specific handle
-                    self._on_file_completed(handle)
-                
-                # connection/debug            
-                elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
-                    logging.debug(f"peer event: {alert}")
+        for alert in alerts:
+            try:
+                self._handle_alert(alert)
+            except RuntimeError as e:
+                # "invalid torrent handle used": the torrent was removed while we were using it
+                logging.warning(f"skipping {type(alert).__name__}: torrent removed mid-handling ({e})")
+            except Exception:
+                logging.exception(f"error handling {type(alert).__name__}; continuing")
+
+    def _handle_alert(self, alert):
+        logging.info(alert)
+
+        # alerts for a torrent that has since been replaced by a newer snapshot: ignore.
+        if isinstance(alert, (lt.metadata_received_alert, lt.file_completed_alert)) \
+                and not self._is_current(alert.handle):
+            logging.info(f"ignoring {type(alert).__name__}: torrent was replaced by a newer snapshot")
+            return
+
+        # received metadata
+        if isinstance(alert, lt.metadata_received_alert):
+            handle = alert.handle
+            logging.info(f"metadata received for torrent: {handle.info_hash()}")
+            self._handle_metadata_completion(handle)
+            with self.t_lock:
+                handle.unset_flags(lt.torrent_flags.upload_mode)  # now allow downloading
+
+        # piece/file completed
+        elif isinstance(alert, lt.file_completed_alert):
+            handle = alert.handle
+            file_idx = alert.index  # the file that completed
+            logging.info(f"file {file_idx} completed on torrent: {handle.info_hash()}")
+            self._report_completed_file(handle, file_idx)
+            # Execute picker update on that specific handle
+            self._on_file_completed(handle)
+
+        # connection/debug
+        elif isinstance(alert, (lt.peer_connect_alert, lt.peer_disconnected_alert, lt.peer_error_alert)):
+            logging.debug(f"peer event: {alert}")
+
 
     def _reconnect_known_peers(self):
         """
@@ -148,7 +176,6 @@ class MutablePeer:
                     continue
                 for ip, p in self.peers:
                     handle.connect_peer((ip, p))
-
 
     def _eval_trs(self):
         timestamp = time.time()
@@ -171,6 +198,7 @@ class MutablePeer:
 
                     # robustness
                     R = -1 # sentinel value
+                    r_bar = 0.0 # defined even with no peers, else the report below never formats
                     p = 0.5 # arbitrary, per paper
 
                     if peer_info:
@@ -219,7 +247,7 @@ class MutablePeer:
             for ip, p in self.peers:
                 logging.info(f"connecting {handle.info_hash()} via {ip}")
                 handle.connect_peer((ip, p))
-        self.torrent_handles[robot_id] = handle
+            self.torrent_handles[robot_id] = handle
 
     def update_torrent(self, robot_id, infohash, peer_ip):
         """
@@ -233,24 +261,18 @@ class MutablePeer:
             logging.debug(f"infohash unchanged for robot id {robot_id}")
             return
         self.known_infohash[robot_id] = new_hash
-
         # remove old handle
-        old_handle = self.torrent_handles.get(robot_id)
-        if old_handle is not None and old_handle.is_valid():
-            logging.debug(f"infohash updated for robot_id {robot_id}, replacing handle")
-            self.processed_metadata_hashes.discard(old_hash)
-            old_handle.pause()
-            with self.t_lock:
-                self.t_ses.remove_torrent(old_handle)
-            self.torrent_handles.pop(robot_id, None)
-        elif old_handle is not None:
-            logging.warning(f"stale/invalid handle for robot_id {robot_id}; removing defensively")
-            try:
-                with self.t_lock:
+        self.processed_metadata_hashes.discard(old_hash)
+        with self.t_lock:
+            old_handle = self.torrent_handles.pop(robot_id, None)
+            if old_handle is not None:
+                logging.debug(f"infohash updated for robot_id {robot_id}, replacing handle")
+                try:
+                    if old_handle.is_valid():
+                        old_handle.pause()
                     self.t_ses.remove_torrent(old_handle)
-            except Exception as e:
-                logging.debug(f"remove_torrent on invalid handle failed (may already be gone): {e}")
-            self.torrent_handles.pop(robot_id, None)
+                except RuntimeError as e:
+                    logging.debug(f"old handle for robot_id {robot_id} already gone: {e}")
 
         # add new handle
         with self.t_lock:
@@ -262,7 +284,7 @@ class MutablePeer:
             for ip, p in self.peers:
                 logging.debug(f"attempting connect_peer to {(ip, p)}")
                 new_handle.connect_peer((ip, p))
-        self.torrent_handles[robot_id] = new_handle
+            self.torrent_handles[robot_id] = new_handle
 
     def _report_completed_file(self, handle, file_idx):
         """tell Rec. the file is fully downloaded"""
@@ -332,18 +354,22 @@ class MutablePeer:
         """
         # this handle is
         with self.t_lock:
-            if not handle.is_valid():
-                return
-            
-            logging.info(f"applying {self.policy.__name__} policy  to handle {handle.info_hash()}")
-            priorities = handle.get_piece_priorities() # pieces same as files
-            downloaded_mask = list(handle.status().pieces)
-            new_priorities = self.policy(priorities, downloaded_mask, self.pol_param)
-            filtered_priorities = ones_filter(new_priorities)
-            lt_priorities = filtered_priorities.astype(int).tolist()
-            check = handle.get_piece_priorities() # pieces same as files
-            logging.info(f"priorities: \n{check}")
-            handle.prioritize_pieces(lt_priorities)
+            try:
+                if not handle.is_valid():
+                    return
+                
+                logging.info(f"applying {self.policy.__name__} policy  to handle {handle.info_hash()}")
+                priorities = handle.get_piece_priorities() # pieces same as files
+                downloaded_mask = list(handle.status().pieces)
+                new_priorities = self.policy(priorities, downloaded_mask, self.pol_param)
+                filtered_priorities = ones_filter(new_priorities)
+                lt_priorities = filtered_priorities.astype(int).tolist()
+                check = handle.get_piece_priorities() # pieces same as files
+                handle.prioritize_pieces(lt_priorities)
+                logging.info(f"priorities: \n{handle.get_piece_priorities()}")
+            except RuntimeError as e:
+                # torrent removed by update_torrent between the checks above and these calls
+                logging.warning(f"_on_file_completed: handle went invalid mid-update ({e}); skipping")
 
 # ======================================================
 
