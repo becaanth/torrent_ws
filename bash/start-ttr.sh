@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# NOTE: COPY TO HOME DIRECTORY ON ROBOTS
 # Start a Teach, Torrent, Repeat robot in a detached tmux session.
 #
 # Run on the ROBOT HOST (outside docker):   ./start_ttr.sh <teacher|repeater> <posegraph> [policy]
@@ -8,9 +7,9 @@
 # Returns immediately; everything keeps running after you disconnect.
 #
 # To watch later:
-#   ssh -t <robot> docker exec -it vtr tmux attach -t ttr
+#   ssh -t <robot> docker exec -it vtr3_ttr tmux attach -t ttr
 # To stop:
-#   ssh <robot> docker exec vtr tmux kill-session -t ttr
+#   ssh <robot> docker exec vtr3_ttr tmux kill-session -t ttr
 set -e
 
 USAGE="usage: start_ttr.sh <teacher|repeater> <posegraph> [policy]"
@@ -23,26 +22,33 @@ case "$POLICY" in
   *) echo "unknown policy '$POLICY'" >&2; echo "$USAGE" >&2; exit 1 ;;
 esac
 
-CONTAINER=vtr3_ttr                                     # <-- your container name
-SCRIPTS=/home/indro/ASRL/vtr3/torrent_ws/scripts       # path INSIDE the container
-
 case "$ROLE" in
-  teacher)  YAML=$SCRIPTS/ttr_teacher.launch.yaml ;;   # VTR + orchestrator
-  repeater) YAML=$SCRIPTS/ttr_repeater.launch.yaml ;;  # VTR + orchestrator + torrent_planner
+  teacher)  YAML_NAME=ttr_teacher.launch.yaml ;;   # VTR + orchestrator
+  repeater) YAML_NAME=ttr_repeater.launch.yaml ;;  # VTR + orchestrator + torrent_planner
   *) echo "role must be 'teacher' or 'repeater', got '$ROLE'" >&2; exit 1 ;;
 esac
 
-# 1. make sure the container is running (no-op if it already is)
+CONTAINER=vtr3_ttr
+
+# 1. make sure the container is running (same as your manual `docker start vtr3_ttr`)
 if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" != "true" ]; then
-  docker start "$CONTAINER" >/dev/null   # if you normally create it with `docker run ...`, put that here instead
+  docker start "$CONTAINER" >/dev/null
 fi
 
-# 2. inside the container: kill any old session, load the new one detached.
-#    bash -i so ~/.bashrc runs and VTRSRC / VTRTEMP / VTRROOT / ROBOT_NAME are set
-#    (tmuxp expands ${VTRTEMP} etc. at load time, so they must exist here).
-docker exec -e TTR_POSEGRAPH="$PG" -e TTR_POLICY="$POLICY" "$CONTAINER" bash -ic "
-  tmux kill-session -t ttr 2>/dev/null || true
-  tmuxp load -d '$YAML'
+# 2. inside the container, through entrypoint.sh (same as your manual
+#    `docker exec -it vtr3_ttr entrypoint.sh bash`, minus -it: no terminal needed).
+#    entrypoint.sh sets up the environment (VTRSRC, VTRTEMP, ROBOT_NAME, ...), then runs bash -c.
+#    The tmux server started here inherits that environment, so every pane has it too.
+#
+#    - kill-server: fresh tmux server each launch, so panes never inherit a stale
+#      environment from an old server. Kills ANY tmux session in this container.
+#    - default-size: a detached session has no terminal, so tmux uses 80x24, which is
+#      too small to split the 4-pane vtr_gui window ("no space for new pane").
+#    - \$HOME is expanded inside the container (root -> /root).
+docker exec -e TTR_POSEGRAPH="$PG" -e TTR_POLICY="$POLICY" "$CONTAINER" entrypoint.sh bash -c "
+  tmux kill-server 2>/dev/null || true
+  grep -qs 'default-size' \$HOME/.tmux.conf || echo 'set -g default-size 250x60' >> \$HOME/.tmux.conf
+  tmuxp load -d \$HOME/ASRL/vtr3/torrent_ws/scripts/$YAML_NAME
 "
 
 echo "started $ROLE session 'ttr' in container '$CONTAINER' with posegraph '$PG', policy '$POLICY'"
