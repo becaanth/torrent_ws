@@ -90,16 +90,15 @@ def flush_logs():
         handler.flush()
 
 
-def evt(kind: str, **fields):
+def evt(event_kind: str, /, **fields):
     """
     Structured event for the analysis scripts (ttr_events.py):
         ... [INFO] [Thread] [file:line]: EVT {"k":"peer","t":1792700000.123456,...}
     t is this robot's wall clock (chrony-synced) in seconds, microsecond resolution.
     Keep field values JSON-serialisable: ints, floats, strings, lists.
     """
-    logging.info("EVT " + json.dumps({"k": kind, "t": round(time.time(), 6), **fields},
+    logging.info("EVT " + json.dumps({**fields, "k": event_kind, "t": round(time.time(), 6)},
                                      separators=(",", ":"), default=str))
-
 
 def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
