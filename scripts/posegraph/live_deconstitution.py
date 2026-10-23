@@ -32,6 +32,7 @@ from rosidl_runtime_py.utilities import get_message
 import zstandard as zstd
 
 from .posegraph_utils import *
+from utils import evt
 
 import pdb
 
@@ -425,6 +426,7 @@ class Deconstitutor:
 
             pad_file_to_exact_size(staging_path, PIECE_SIZE)
             os.rename(staging_path, final_path)
+            evt("chunk", file=filename, sid=hex(sid), bytes=os.path.getsize(final_path))
             self._written_chunks.add(i)
             logging.debug(f"finalized chunk {filename}")
 

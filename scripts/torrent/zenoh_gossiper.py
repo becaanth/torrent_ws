@@ -6,6 +6,11 @@ from threading import Lock
 
 from torrent.torrent_utils import unpack_device
 
+try:
+    from utils import evt
+except ImportError:
+    def evt(kind, **f): logging.info(f"EVT {kind} {f}")
+
 logger = logging.getLogger(__name__)
 
 class ZenohGossiper:
@@ -73,8 +78,11 @@ class ZenohGossiper:
             self.max_seq_seen[item['robot_id']] = item['seq']
         self._put(item)
 
-    def _put(self, mutable_item : dict):
+    def _put(self, mutable_item : dict, kind: str = "forward"):
         payload = msgpack.packb(mutable_item, use_bin_type=True)
+        ih = mutable_item.get('infohash')
+        evt("gossip_tx", origin=mutable_item['robot_id'], seq=mutable_item['seq'], kind=kind,
+        ih=bytes(ih).hex() if isinstance(ih, (bytes, bytearray)) else None, bytes=len(payload))
         logging.debug(f"putting zenoh item for robot_id {mutable_item['robot_id']} seq {mutable_item['seq']}")
         self.z_ses.put(f"mutable_items/{mutable_item['robot_id']}", payload)
 
@@ -115,6 +123,12 @@ class ZenohGossiper:
         when a zenoh item appears, interact with self.mutable_items
         """
         logging.info("Received Zenoh message")
+        payload = bytes(sample.payload)
+        mi = msgpack.unpackb(payload, raw=False)
+        ih = mi.get('infohash')
+        evt("gossip_rx", origin=mi.get('robot_id'), seq=mi.get('seq'), via_ip=mi.get('my_ip'),
+            ih=bytes(ih).hex() if isinstance(ih, (bytes, bytearray)) else None, bytes=len(payload))
+
         if sample == self.last_sample:
             logging.debug("duplicate sample")
             return

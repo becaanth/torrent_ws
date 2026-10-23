@@ -12,6 +12,7 @@ from rosidl_runtime_py.utilities import get_message
 
 from .posegraph_utils import *
 from torrent.torrent_utils import inspect_torrent
+from utils import evt
 
 from vtr_pose_graph_msgs.msg import Vertex, Edge, EdgeType, EdgeMode
 from vtr_pose_graph_msgs.msg import Graph, MapInfo
@@ -266,6 +267,7 @@ class Reconstitutor:
                         if not self.pieces:
                             continue # wait for metadata
                         self._ingest_remote_piece(poll_data, target_piece)
+                        evt("ingest", file=db_file, origin=folder_name)
                         logging.debug(f"ingest remote piece {db_file}")
                     
                     self.db_written.append(db_file)

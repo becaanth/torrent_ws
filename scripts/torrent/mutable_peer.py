@@ -7,12 +7,26 @@ import argparse
 
 from .torrent_utils import *
 from .piece_pickers import get_policy, ones_filter, eval_seq
+import json
+from utils import evt
 import logging
 
 PORT = 5204
 FLEET_SIZE=16
+PEER_ID_PREFIX = b"-TT"   # orchestrator sets peer_fingerprint "-TT<robot id, 2 digits>00-"
 logger = logging.getLogger(__name__)
 
+def _peer_robot(pi):
+    """Robot id of a connected peer, from the libtorrent peer id the orchestrator sets; None if unknown."""
+    try:
+        pid = bytes(pi.pid.to_bytes())[:8]
+        if pid.startswith(PEER_ID_PREFIX):
+            return int(pid[3:5])
+    except Exception:
+        pass
+    return None
+logger = logging.getLogger(__name__)
+ 
 class MutablePeer:
     """
     Listen to gossip and join torrent sessions
@@ -48,6 +62,7 @@ class MutablePeer:
         self.torrent_handles = {} # robot_id -> handle
         self.known_infohash = {}  # robot_id -> infohash bytes
         self.processed_metadata_hashes = set()  # Track infohashes we've already handled
+        self._seen_paths = set()  # piece files already reported once (re-checks re-announce them)
 
         # inversion of control callbacks
         self.on_metadata_received = on_metadata_received   # pass to Reconstitutor
@@ -180,27 +195,50 @@ class MutablePeer:
     def _eval_trs(self):
         timestamp = time.time()
         with self.t_lock:
-            for handle in self.t_ses.get_torrents():
-                s = handle.status()
-                info_hash = str(handle.info_hash())
-                peer_info = handle.get_peer_info()
-
+            # infohash -> robot whose map this torrent carries; anything else is this robot's own seed
+            origin_of = {}
+            for rid, h in list(self.torrent_handles.items()):
                 try:
+                    origin_of[str(h.info_hash())] = rid
+                except RuntimeError:
+                    pass
+            for handle in self.t_ses.get_torrents():
+                try:
+                    s = handle.status()
+                    info_hash = str(handle.info_hash())
+                    peer_info = handle.get_peer_info()
+ 
+                    # structured stats for the analysis scripts. Counters are per torrent (they
+                    # restart when a snapshot replaces it) and per connection (restart on reconnect).
+                    origin = origin_of.get(info_hash, self.robot_id)
+                    role = "remote" if info_hash in origin_of else "own"
+                    evt("torrent", ih=info_hash, origin=origin, role=role, state=str(s.state),
+                        dl=s.total_payload_download, ul=s.total_payload_upload,
+                        dl_wire=s.total_download, ul_wire=s.total_upload,
+                        dl_rate=s.download_payload_rate, ul_rate=s.upload_payload_rate,
+                        have=int(sum(s.pieces)) if s.pieces else 0, pieces=len(s.pieces),
+                        peers=s.num_peers)
+                    for pi in peer_info:
+                        evt("peer", ih=info_hash, origin=origin, role=role,
+                            peer=_peer_robot(pi), addr=str(pi.ip[0]),
+                            dl=pi.total_download, ul=pi.total_upload,      # payload bytes, this connection
+                            dl_rate=pi.payload_down_speed, ul_rate=pi.payload_up_speed)
+ 
                     # throughput
                     up_all_time = s.all_time_upload
                     down_all_time = s.all_time_download
                     up_payload_rate = s.upload_payload_rate
                     down_payload_rate = s.download_payload_rate
-
+ 
                     # sequentiality
                     downloaded_mask = list(s.pieces)
                     sequentiality, U, M, l = eval_seq(downloaded_mask)
-
+ 
                     # robustness
                     R = -1 # sentinel value
                     r_bar = 0.0 # defined even with no peers, else the report below never formats
                     p = 0.5 # arbitrary, per paper
-
+ 
                     if peer_info:
                         if len(peer_info) >= 0 and M > 0:
                             logging.info(f"peer_info {peer_info}") 
@@ -208,7 +246,7 @@ class MutablePeer:
                             r_i = np.sum(peer_matrices, axis=0)                         
                             r_bar = np.mean(r_i) 
                             R = float(1.0 - (p ** r_bar))
-
+ 
                     eval_string = (
                     f"Eval report for handle {info_hash}\n"
                     f" Throughput Up: {up_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
@@ -217,7 +255,7 @@ class MutablePeer:
                     f" Robustness: {R:.4f} (r_bar={r_bar:.2f})"
                     )                        
                     logging.info(eval_string)
-
+ 
                     with open(self.metrics_csv, mode='a', newline='') as f:
                         writer = csv.writer(f)
                         writer.writerow([
@@ -229,6 +267,7 @@ class MutablePeer:
                         ])
                 except Exception as e:
                     logging.info(f"Eval report is not ready bc {e}")
+
 
     def join_torrent(self, robot_id, infohash, peer_ip):
         """
@@ -294,8 +333,21 @@ class MutablePeer:
         ti = handle.torrent_file()
         if ti is None:
             return
-        rel_path = ti.files().file_path(file_idx)
-        self.on_file_completed(os.path.join(self.output_path, rel_path))
+
+        fs = ti.files()
+        rel_path = fs.file_path(file_idx)
+        path = os.path.join(self.output_path, rel_path)
+ 
+        # every re-check after a snapshot switch re-announces files already on disk:
+        # only the first completion of a path is newly downloaded data
+        if path not in self._seen_paths and rel_path.endswith(".db3"):
+            self._seen_paths.add(path)
+            parts = rel_path.replace(os.sep, "/").split("/")
+            evt("piece", ih=str(handle.info_hash()), file=parts[-1],
+                origin=parts[-2] if len(parts) > 1 else None, bytes=fs.file_size(file_idx))
+ 
+        if self.on_file_completed is not None:
+            self.on_file_completed(path)
 
     def _remember_peer(self, peer_ip):
         peer_endpoint = (peer_ip, PORT)
@@ -337,6 +389,10 @@ class MutablePeer:
         metadata = info.metadata()
         if metadata:
             self.len_metadata = len(metadata)
+            evt("metadata", ih=infohash_bytes.hex(), origin=robot_id, bytes=len(metadata),
+                pieces=num_pieces, files=num_files)
+            logging.info(f"Received metadata for {infohash_bytes.hex()} | Size: {self.len_metadata} bytes")
+
             logging.info(f"Received metadata for {infohash_bytes.hex()} | Size: {self.len_metadata} bytes")
 
         # orchestrator callback

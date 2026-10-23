@@ -60,7 +60,8 @@ class Orchestrator:
             "enable_dht": False,
             "enable_outgoing_utp": False,
             "enable_incoming_utp": False,
-            "alert_mask": alert_mask
+            "alert_mask": alert_mask,
+            "peer_fingerprint": f"-TT{int(robot_id):02d}00-",   # lets other robots name this peer
         })
 
         # posegraph -> pieces
@@ -149,6 +150,8 @@ class Orchestrator:
         # seeder created a new snapshot (cb from seeder to gossiper)
         self.mi['seq'] += 1
         self.mi['infohash'] = infohash
+        evt("snapshot", seq=self.mi['seq'], ih=bytes(infohash).hex(),
+            bytes=self.seeder.len_torrent, metadata=self.seeder.len_metadata)
         logging.info(f"seeding mutable item: robot_id={self.mi['robot_id']} seq={self.mi['seq']}")
         self.gossiper._publish_item(self.mi)
 
@@ -166,6 +169,9 @@ class Orchestrator:
     def handle_new_vertex(self, vertex_id):
         # localized to new vertex, pass to seeder to filter files in repeat (cb from tr_listener)
         logging.info(f"localized to {vertex_id}, telling seeder")
+        if vertex_id != self.current_vtx:        # robot_state arrives ~10 Hz; log only changes
+        evt("vertex", vid=int(vertex_id))
+        self.current_vtx = vertex_id
         self.seeder.current_vtx = vertex_id #int(2**63) sentinel to disable repeat filter for now
 
     def _spin_ros(self):
