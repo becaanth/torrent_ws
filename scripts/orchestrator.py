@@ -54,6 +54,8 @@ class Orchestrator:
             | lt.alert_category.storage
             | lt.alert_category.error
             | lt.alert_category.peer
+            | lt.alert_category.block_progress   # block_finished_alert: who each 16 KiB block came from
+            | lt.alert_category.upload           # block_uploaded_alert: who each block was sent to
         )
         self.t_ses = lt.session({
             "listen_interfaces": f"0.0.0.0:{LT_PORT},[::]:{LT_PORT}",

@@ -14,19 +14,32 @@ import logging
 PORT = 5204
 FLEET_SIZE=16
 PEER_ID_PREFIX = b"-TT"   # orchestrator sets peer_fingerprint "-TT<robot id, 2 digits>00-"
+BLOCK_SIZE = 16 * 1024    # libtorrent transfers pieces in 16 KiB blocks
 logger = logging.getLogger(__name__)
 
-def _peer_robot(pi):
-    """Robot id of a connected peer, from the libtorrent peer id the orchestrator sets; None if unknown."""
+def _robot_from_pid(pid):
+    """Robot id from a libtorrent peer id the orchestrator sets ("-TT0100-..."); None if unknown."""
     try:
-        pid = bytes(pi.pid.to_bytes())[:8]
-        if pid.startswith(PEER_ID_PREFIX):
-            return int(pid[3:5])
+       b = bytes(pid.to_bytes())[:8]
+       if b.startswith(PEER_ID_PREFIX):
+           return int(b[3:5])
     except Exception:
         pass
     return None
 logger = logging.getLogger(__name__)
- 
+
+def _peer_robot(pi):
+    """Robot id of a connected peer (peer_info)."""
+    return _robot_from_pid(pi.pid)
+
+def _alert_addr(alert):
+    """Peer IP of a peer alert (bindings expose it as .endpoint, older ones as .ip)."""
+    ep = getattr(alert, "endpoint", None) or getattr(alert, "ip", None)
+    try:
+        return str(ep[0])
+    except Exception:
+        return str(ep)
+  
 class MutablePeer:
     """
     Listen to gossip and join torrent sessions
@@ -64,6 +77,13 @@ class MutablePeer:
         self.processed_metadata_hashes = set()  # Track infohashes we've already handled
         self._seen_paths = set()  # piece files already reported once (re-checks re-announce them)
 
+        # exact per-peer transfer totals, counted block by block from libtorrent alerts.
+        # Cumulative for the whole run: unlike peer_info counters they survive disconnects
+        # and torrent replacement. (dir, peer robot id, peer ip) -> [bytes, blocks]
+        self._xfer = {}
+        self._xfer_logged = {}      # key -> bytes at the last "xfer" event
+        self._piece_len = {}        # infohash -> (piece_length, total_size) for exact last-block sizes
+
         # inversion of control callbacks
         self.on_metadata_received = on_metadata_received   # pass to Reconstitutor
         self.on_file_completed = on_file_completed   # pass to Reconstitutor
@@ -76,6 +96,28 @@ class MutablePeer:
 
         # etc
         self.poll_hz = poll_hz
+
+
+    def _block_bytes(self, alert):
+        """Size of the block in this alert: 16 KiB, except a shorter last block of the torrent."""
+        try:
+            ih = str(alert.handle.info_hash())
+            if ih not in self._piece_len:
+                ti = alert.handle.torrent_file()
+                if ti is None:
+                    return BLOCK_SIZE
+                self._piece_len[ih] = (ti.piece_length(), ti.total_size())
+            plen, total = self._piece_len[ih]
+            start = alert.piece_index * plen + alert.block_index * BLOCK_SIZE
+            return max(0, min(BLOCK_SIZE, plen - alert.block_index * BLOCK_SIZE, total - start))
+        except Exception:
+            return BLOCK_SIZE
+
+    def _count_block(self, alert, direction):
+        key = (direction, _robot_from_pid(alert.pid), _alert_addr(alert))
+        tot = self._xfer.setdefault(key, [0, 0])
+        tot[0] += self._block_bytes(alert)
+        tot[1] += 1
 
     def _init_metrics_csv(self):
             """Create CSV file and write headers if it doesn't exist."""
@@ -149,13 +191,22 @@ class MutablePeer:
                 logging.exception(f"error handling {type(alert).__name__}; continuing")
 
     def _handle_alert(self, alert):
-        logging.info(alert)
+        # block transfers: count them (also for torrents already replaced -- the bytes still moved)
+        if isinstance(alert, lt.block_uploaded_alert):
+            self._count_block(alert, "up")
+            return
+        if isinstance(alert, lt.block_finished_alert):
+            self._count_block(alert, "down")
+            return
 
+        logging.info(alert)
+        
         # alerts for a torrent that has since been replaced by a newer snapshot: ignore.
         if isinstance(alert, (lt.metadata_received_alert, lt.file_completed_alert)) \
                 and not self._is_current(alert.handle):
             logging.info(f"ignoring {type(alert).__name__}: torrent was replaced by a newer snapshot")
             return
+
 
         # received metadata
         if isinstance(alert, lt.metadata_received_alert):
@@ -195,7 +246,21 @@ class MutablePeer:
                 except RuntimeError:
                     continue # being replaced by update_torrent currently
 
+    def _log_xfer(self):
+        """
+        One "xfer" event per (direction, peer) whose total changed since the last tick.
+        bytes/blocks are cumulative since the orchestrator started (never reset), so the
+        difference between two events of the same series is exactly the data moved between them.
+        """
+        for (direction, peer, addr), (nbytes, nblocks) in self._xfer.items():
+            key = (direction, peer, addr)
+            if self._xfer_logged.get(key) == nbytes:
+                continue
+            self._xfer_logged[key] = nbytes
+            evt("xfer", dir=direction, peer=peer, addr=addr, bytes=nbytes, blocks=nblocks)
+ 
     def _eval_trs(self):
+        self._log_xfer()
         timestamp = time.time()
         with self.t_lock:
             # infohash -> robot whose map this torrent carries; anything else is this robot's own seed
@@ -329,10 +394,7 @@ class MutablePeer:
             self.torrent_handles[robot_id] = new_handle
 
     def _report_completed_file(self, handle, file_idx):
-        """tell Rec. the file is fully downloaded"""
-        if self.on_file_completed is None:
-            return
-
+        """tell Rec. the file is fully downloaded; log first completions as new data"""
         ti = handle.torrent_file()
         if ti is None:
             return
@@ -394,8 +456,6 @@ class MutablePeer:
             self.len_metadata = len(metadata)
             evt("metadata", ih=infohash_bytes.hex(), origin=robot_id, bytes=len(metadata),
                 pieces=num_pieces, files=num_files)
-            logging.info(f"Received metadata for {infohash_bytes.hex()} | Size: {self.len_metadata} bytes")
-
             logging.info(f"Received metadata for {infohash_bytes.hex()} | Size: {self.len_metadata} bytes")
 
         # orchestrator callback
