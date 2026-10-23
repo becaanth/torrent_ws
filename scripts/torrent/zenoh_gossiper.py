@@ -76,8 +76,8 @@ class ZenohGossiper:
         with self._items_lock:
             self.mutable_items[item['robot_id']] = item
             self.max_seq_seen[item['robot_id']] = item['seq']
-        self._put(item)
-
+        self._put(item, kind="publish")
+        
     def _put(self, mutable_item : dict, kind: str = "forward"):
         payload = msgpack.packb(mutable_item, use_bin_type=True)
         ih = mutable_item.get('infohash')
