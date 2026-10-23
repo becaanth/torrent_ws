@@ -343,7 +343,7 @@ class Reconstitutor:
         piece.vertices = poll_data['vertices']
         piece.edges = poll_data['edges']
         piece.pointmap = pointmap
-        piece.pointmap_v0 = pointmap.copy
+        piece.pointmap_v0 = pointmap.copy()
         piece.pointmap_ptr = poll_data['pointmap_ptr']
         piece.waypoint_name = poll_data['waypoint_name']
         piece.vtr_index = poll_data['vtr_index']

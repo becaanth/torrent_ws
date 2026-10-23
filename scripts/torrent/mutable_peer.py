@@ -186,11 +186,14 @@ class MutablePeer:
         if not self.peers or not self.torrent_handles:
             return
         with self.t_lock:
-            for robot_id, handle in self.torrent_handles.items():
-                if not handle.is_valid():
-                    continue
-                for ip, p in self.peers:
-                    handle.connect_peer((ip, p))
+            for robot_id, handle in list(self.torrent_handles.items()):
+                try:
+                    if not handle.is_valid():
+                        continue
+                    for ip, p in self.peers:
+                        handle.connect_peer((ip, p))
+                except RuntimeError:
+                    continue # being replaced by update_torrent currently
 
     def _eval_trs(self):
         timestamp = time.time()

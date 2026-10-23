@@ -5,6 +5,7 @@ import queue
 import sys
 import threading
 from datetime import datetime
+import time
 import json
 
 # Console output goes through a queue so worker threads never block on a
