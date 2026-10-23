@@ -170,7 +170,7 @@ class Orchestrator:
         # localized to new vertex, pass to seeder to filter files in repeat (cb from tr_listener)
         logging.info(f"localized to {vertex_id}, telling seeder")
         if vertex_id != self.current_vtx:        # robot_state arrives ~10 Hz; log only changes
-        evt("vertex", vid=int(vertex_id))
+            evt("vertex", vid=int(vertex_id))
         self.current_vtx = vertex_id
         self.seeder.current_vtx = vertex_id #int(2**63) sentinel to disable repeat filter for now
 
