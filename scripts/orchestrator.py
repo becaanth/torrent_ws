@@ -145,7 +145,7 @@ class Orchestrator:
         self.peer.join_torrent(robot_id, mutable_item['infohash'], mutable_item['my_ip'])
 
     def handle_file_completed(self, path):
-        logging.info(f"handle file completed: {path}")
+        # logging.info(f"handle file completed: {path}")
         self.rec.mark_file_complete(path)
 
     def handle_snapshot_created(self, infohash):
@@ -170,7 +170,7 @@ class Orchestrator:
 
     def handle_new_vertex(self, vertex_id):
         # localized to new vertex, pass to seeder to filter files in repeat (cb from tr_listener)
-        logging.info(f"localized to {vertex_id}, telling seeder")
+        # logging.info(f"localized to {vertex_id}, telling seeder")
         if vertex_id != self.current_vtx:        # robot_state arrives ~10 Hz; log only changes
             evt("vertex", vid=int(vertex_id))
         self.current_vtx = vertex_id

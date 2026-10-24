@@ -304,7 +304,7 @@ class Deconstitutor:
 
             # actual vertex IDs belonging to this submap
             relevant_vids = self._this_vids[ptr_row_idxs]
-            logger.info(f"relevant_vids {relevant_vids}")
+            # logger.info(f"relevant_vids {relevant_vids}")
 
             is_local = (extract_robot_id(sid) == self.robot_id) or any(
                 extract_robot_id(int(v)) == self.robot_id for v in relevant_vids

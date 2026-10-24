@@ -53,10 +53,10 @@ def setup_logging(robot_id: str, posegraph: str, log_dir: str = "logs"):
 
     # 1. File Handler (Max 10 MB per file, keeps up to 5 backup logs) -- unchanged
     file_handler = RotatingFileHandler(
-        log_filename, maxBytes=10 * 1024 * 1024, backupCount=50
+        log_filename, maxBytes=100 * 1024 * 1024, backupCount=50
     )
     file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(logging.INFO)
     root_logger.addHandler(file_handler)
 
     # 2. Console: worker threads -> queue -> listener thread -> stdout

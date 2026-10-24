@@ -199,8 +199,6 @@ class MutablePeer:
             self._count_block(alert, "down")
             return
 
-        logging.info(alert)
-        
         # alerts for a torrent that has since been replaced by a newer snapshot: ignore.
         if isinstance(alert, (lt.metadata_received_alert, lt.file_completed_alert)) \
                 and not self._is_current(alert.handle):
@@ -314,15 +312,6 @@ class MutablePeer:
                             r_i = np.sum(peer_matrices, axis=0)                         
                             r_bar = np.mean(r_i) 
                             R = float(1.0 - (p ** r_bar))
- 
-                    eval_string = (
-                    f"Eval report for handle {info_hash}\n"
-                    f" Throughput Up: {up_payload_rate / 1e6:.2f} MB/s (Total: {up_all_time / 1e6:.2f} MB)\n"
-                    f" Throughput Down: {down_payload_rate / 1e6:.2f} MB/s (Total: {down_all_time / 1e6:.2f} MB)\n"
-                    f" Sequentiality: {sequentiality:.4f} ({U}/{M} useful pieces)\n"
-                    f" Robustness: {R:.4f} (r_bar={r_bar:.2f})"
-                    )                        
-                    logging.info(eval_string)
  
                     with open(self.metrics_csv, mode='a', newline='') as f:
                         writer = csv.writer(f)
@@ -485,7 +474,7 @@ class MutablePeer:
                 lt_priorities = filtered_priorities.astype(int).tolist()
                 check = handle.get_piece_priorities() # pieces same as files
                 handle.prioritize_pieces(lt_priorities)
-                logging.info(f"priorities: \n{handle.get_piece_priorities()}")
+                # logging.info(f"priorities: \n{handle.get_piece_priorities()}")
             except RuntimeError as e:
                 # torrent removed by update_torrent between the checks above and these calls
                 logging.warning(f"_on_file_completed: handle went invalid mid-update ({e}); skipping")

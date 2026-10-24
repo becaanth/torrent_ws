@@ -57,7 +57,7 @@ def filter_in_progress_files(file_path: str) -> bool:
     
     # Filter out SQLite write-ahead logs and rollback journals
     if filename.endswith('.db3-wal') or filename.endswith('.db3-journal'):
-        logging.debug(f"Skipping temporary SQLite file: {filename}")
+        # logging.debug(f"Skipping temporary SQLite file: {filename}")
         return False
 
     return True
@@ -67,13 +67,13 @@ def filter_repeat_files(file_path: str, current_vertex_id: int) -> bool:
     # get filename as hex
     base_name = os.path.basename(file_path)
     hex_str, _ = os.path.splitext(base_name)
-    logging.debug(f"file_path {file_path}, hex_str {hex_str}, current_vtx {current_vertex_id}")
+    # logging.debug(f"file_path {file_path}, hex_str {hex_str}, current_vtx {current_vertex_id}")
     try:
         hex_val = int(hex_str, 16)
     except ValueError:
-        logging.debug("ValueError")
+        # logging.debug("ValueError")
         return False
-    logging.debug(f"hex_val {hex_val}")
+    # logging.debug(f"hex_val {hex_val}")
 
     # TODO: we only want to filter by run id, but for now, with only one run id per robot, we can just filter by magnitude
     return current_vertex_id >= hex_val

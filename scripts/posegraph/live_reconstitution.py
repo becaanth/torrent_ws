@@ -163,14 +163,14 @@ class Reconstitutor:
 
             for r_id, topo in topo_items:
                 # dont need topology for pieces this robot made
-                logging.debug(f"_poll hash of self.topology r_id {r_id}: {hash(topo)}")
+                # logging.debug(f"_poll hash of self.topology r_id {r_id}: {hash(topo)}")
                 # if local pieces; ignore
                 if str(r_id) == str(self.robot_id):
                     continue
 
                 # decode topology from binary
                 pieces, idx = inspect_torrent(topo)
-                logging.info(f"inspect_torrent(r_id={r_id}) -> {len(pieces)} pieces, idx_present={idx is not None}")
+                # logging.info(f"inspect_torrent(r_id={r_id}) -> {len(pieces)} pieces, idx_present={idx is not None}")
 
                 # if we havent written index before, write index
                 if idx is None:
@@ -190,13 +190,12 @@ class Reconstitutor:
                         piece.metadata_written = False
                         piece.data_ingested = False
                         self.pieces[vid] = piece
-                        logging.info(f"piece vid: {vid}: top_edges{piece.top_edges}")
+                        # logging.info(f"piece vid: {vid}: top_edges{piece.top_edges}")
                     # this a tracked piece
                     else:
                        continue
 
             # Write metadata skeletons for any piece not yet written
-            logging.info(f"self.pieces {self.pieces.keys()}")
             for vid, piece in self.pieces.items():
                 if not getattr(piece, 'metadata_written', False):  # empty dict = not yet written
                     self._write_metadata(piece)
@@ -259,9 +258,9 @@ class Reconstitutor:
                         continue
 
                     # if this robot's pieces
-                    if folder_name == self.robot_id:
+                    # if folder_name == self.robot_id:
                         # self._ingest_local_piece(poll_data)
-                        logging.debug(f"local piece, skip {db_file}")
+                        # logging.debug(f"local piece, skip {db_file}")
 
                     else:
                         if not self.pieces:

@@ -27,7 +27,7 @@ class RobotStateListener(Node):
     def robot_state_callback(self, robot_state):
         # get id of current vertex were localized to
         current_vtx = robot_state.index
-        logger.info(f"localized to vertex {current_vtx}")
+        # logger.info(f"localized to vertex {current_vtx}")
         self.on_new_vertex(current_vtx)
 
 def main(args=None):
