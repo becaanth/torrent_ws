@@ -174,7 +174,8 @@ class Orchestrator:
         if vertex_id != self.current_vtx:        # robot_state arrives ~10 Hz; log only changes
             evt("vertex", vid=int(vertex_id))
         self.current_vtx = vertex_id
-        self.seeder.current_vtx = vertex_id #int(2**63) sentinel to disable repeat filter for now
+        # self.seeder.current_vtx = vertex_id # when convoying
+        self.seeder.current_vtx = int(2**63) # sentinel to disable repeat filter for now
 
     def _spin_ros(self):
         """ Helper to spin ROS2 thread """
