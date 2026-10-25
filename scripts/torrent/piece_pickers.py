@@ -10,8 +10,6 @@ def rarest_random(priorities, mask, _):
     Vanilla Rarest-First (all priorities=4)
     """
     # reset all priorities to 4
-    print(priorities)
-    print(mask)
     # new_priorities = np.array([4 * (not bool(m)) for m in mask])
     new_priorities = np.where(np.logical_not(mask), np.random.uniform(1.0, 5.0, size=len(mask)), 0.0)
     return new_priorities
@@ -33,8 +31,8 @@ def sequential(priorities, mask, _):
 
     return new_priorities
 
-def cascading(priorities, mask):
-    return sequential(priorities, mask, _)
+def cascading(priorities, mask, param=None):
+    return sequential(priorities, mask, None)
 
 def hybrid(priorities, mask, thresh=0.5):
     # with probability s use sequential, (1-s) use rarest_first 
