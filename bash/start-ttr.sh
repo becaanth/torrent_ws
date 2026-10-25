@@ -24,6 +24,7 @@ esac
 
 case "$ROLE" in
   teacher)  YAML_NAME=ttr_teacher.launch.yaml ;;   # VTR + orchestrator
+  mteacher)  YAML_NAME=ttr_mteacher.launch.yaml ;;   # VTR + orchestrator
   repeater) YAML_NAME=ttr_repeater.launch.yaml ;;  # VTR + orchestrator + torrent_planner
   *) echo "role must be 'teacher' or 'repeater', got '$ROLE'" >&2; exit 1 ;;
 esac
