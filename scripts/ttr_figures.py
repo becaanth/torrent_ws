@@ -301,10 +301,160 @@ def ev_times(ev, robot):
     return np.sort(np.concatenate([d.loc[d["robot"] == robot, "t"].to_numpy() for d in ev.values()]))
 
 
+def make_geo(args):
+    if not args.origin:
+        return None
+    from ttr_geo import GeoFrame
+    lat, lon, theta = args.origin
+    return GeoFrame(lat, lon, theta, scale=args.map_scale, rotate_deg=args.rotate_deg,
+                    flip_y=args.flip_y, offset_m=args.offset_m)
+
+
+def to_mercator_dict(pos, geo):
+    from ttr_geo import to_mercator_dict as f
+    return f(pos, geo)
+
+
+def draw_map(ax, bg, geo, args, graph=True):
+    """Teach graph (grey, or white over imagery) with limits, aspect, labels and optional satellite basemap."""
+    span = max(np.ptp(bg[:, 0]), np.ptp(bg[:, 1]), 10.0)
+    ax.set_xlim(bg[:, 0].min() - 0.06 * span, bg[:, 0].max() + 0.06 * span)
+    ax.set_ylim(bg[:, 1].min() - 0.06 * span, bg[:, 1].max() + 0.06 * span)
+    ax.set_aspect("equal")
+    imagery = False
+    if geo is not None and args.basemap != "none":
+        from ttr_geo import add_satellite, add_scalebar
+        imagery = add_satellite(ax, source=args.basemap, cache_dir=args.tile_cache)
+        add_scalebar(ax, geo)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    else:
+        ax.set_xlabel("x (m)" if geo is None else "Web Mercator x (m)")
+        ax.set_ylabel("y (m)" if geo is None else "Web Mercator y (m)")
+    if graph:
+        ax.plot(bg[:, 0], bg[:, 1], ".", color="white" if imagery else "#cfcfcf",
+                ms=2 if not imagery else 1.5, alpha=0.8 if imagery else 1.0, zorder=1)
+    return imagery
+
+
+def teacher_of(vid):
+    """Robot that taught a vertex: the top 4 bits of its id."""
+    return int(vid) >> 60
+
+
+def read_stamps(path):
+    """vid -> vertex timestamp in seconds, from export_vertex_positions.py's 'stamp' column (ns)."""
+    import csv
+    out = {}
+    with open(path) as f:
+        for r in csv.DictReader(f):
+            try:
+                st = float(r.get("stamp") or 0)
+            except ValueError:
+                continue
+            if st > 0:
+                out[int(r["vid"])] = st / 1e9 if st > 1e15 else st
+    return out
+
+
+def reveal_times(ev, vids, stamps, t_lo, t_hi):
+    """
+    When each vertex came into existence, for drawing the graph as it is taught.
+      1. first time the robot that taught it logged it (its own vertex events during teach)
+      2. else its timestamp from the positions CSV, if that is a plausible wall-clock time
+      3. else -inf: taught before this recording (drawn faded from the first frame)
+    Repeaters reaching a vertex never reveal it, so the map does not appear to grow where they drive.
+    """
+    first = {}
+    if "vertex" in ev:
+        v = ev["vertex"]
+        for r, t, vid in zip(v["robot"], v["t"], v["vid"].astype("uint64")):
+            vid = int(vid)
+            if int(r) == teacher_of(vid) and t < first.get(vid, np.inf):
+                first[vid] = t
+    # logged span of each teach sequence (robot + run = vid >> 16), by minor id
+    by_seq = {}
+    for vid, t in first.items():
+        by_seq.setdefault(vid >> 16, []).append((vid & 0xFFFF, t))
+    seq_info = {}
+    for seq, mt in by_seq.items():
+        mt.sort()
+        minors = np.array([m for m, _ in mt])
+        later_min = np.minimum.accumulate(np.array([t for _, t in mt])[::-1])[::-1]   # earliest time at or after
+        seq_info[seq] = (minors, later_min)
+
+    out = {}
+    src = {"taught (log)": 0, "between logged (filled)": 0, "taught (stamp)": 0,
+           "before recording": 0, "after recording": 0}
+    for vid in vids:
+        vid = int(vid)
+        if vid in first:
+            out[vid] = first[vid]; src["taught (log)"] += 1
+            continue
+        if vid in stamps and t_lo - 86400 <= stamps[vid] <= t_hi + 3600:
+            st = stamps[vid]
+            out[vid] = st if st >= t_lo else -np.inf
+            src["taught (stamp)" if st >= t_lo else "before recording"] += 1
+            continue
+        info = seq_info.get(vid >> 16)
+        if info is None:                               # no vertex of this run was logged being taught
+            out[vid] = -np.inf; src["before recording"] += 1
+            continue
+        minors, later_min = info
+        m = vid & 0xFFFF
+        if m < minors[0]:                              # before the teacher's logs start
+            out[vid] = -np.inf; src["before recording"] += 1
+        elif m > minors[-1]:                           # taught after the teacher's logs end: never shown
+            out[vid] = np.inf; src["after recording"] += 1
+        else:                                          # skipped between two logged vertices
+            out[vid] = float(later_min[np.searchsorted(minors, m)]); src["between logged (filled)"] += 1
+    print("  graph vertices: " + ", ".join(f"{k} {n}" for k, n in src.items() if n))
+    return out
+
+
+def map_check(ev, out, args):
+    """One still: every vertex of the teach graph (and every visited vertex) over the basemap."""
+    pos = read_positions(args.positions)
+    geo = make_geo(args)
+    if geo is None:
+        print("  map_check needs --origin LAT LON THETA")
+        return
+    pos = to_mercator_dict(pos, geo)
+    bg = np.array(list(pos.values()))
+    fig, ax = plt.subplots(figsize=(9, 7.5), dpi=150)
+    draw_map(ax, bg, geo, args, graph=False)
+    for r in sorted({teacher_of(v) for v in pos}):
+        xy = np.array([p for v, p in pos.items() if teacher_of(v) == r])
+        ax.plot(xy[:, 0], xy[:, 1], ".", ms=1.5, color=color(r), alpha=0.6, zorder=1, label=f"taught by {name(r)}")
+    root = geo.to_mercator([[0.0, 0.0]])[0]
+    ax.plot(*root, marker="*", ms=14, color="red", mec="black", zorder=5, label="root vertex")
+    if "vertex" in ev:
+        for r, d in ev["vertex"].groupby("robot"):
+            xy = np.array([pos[int(v)] for v in d["vid"].astype("uint64") if int(v) in pos])
+            if len(xy):
+                ax.plot(xy[:, 0], xy[:, 1], ".", ms=3, color=color(r), zorder=3, label=f"visited by {name(r)}")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.set_title(f"map check: root ({geo.lat:.6f}, {geo.lon:.6f}), theta {math_deg(geo.theta):.1f} deg CCW from east")
+    path = os.path.join(out, "map_check.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  wrote map_check.png")
+
+
+def math_deg(rad):
+    return float(np.degrees(rad))
+
+
 def strip_positions(vids):
     """No positions file: distance along each teach sequence, sequences laid end to end."""
     vids = [int(v) for v in vids]
     seqs = sorted({v >> 16 for v in vids})
+    # include every vertex between a run's first and last logged one (unlogged ones were passed, not absent)
+    full = []
+    for s in seqs:
+        ms = [v & 0xFFFF for v in vids if v >> 16 == s]
+        full += [(s << 16) | m for m in range(min(ms), max(ms) + 1)]
+    vids = full
     offset, base = 0.0, {}
     for s in seqs:
         base[s] = offset
@@ -322,6 +472,10 @@ def animate(ev, out, args, with_flows):
     all_vids = np.unique(v["vid"].astype("uint64"))
     strip = not args.positions
     pos = read_positions(args.positions) if args.positions else strip_positions(all_vids)
+    stamps = read_stamps(args.positions) if args.positions else {}
+    geo = make_geo(args) if not strip else None
+    if geo is not None:
+        pos = to_mercator_dict(pos, geo)               # root-frame metres -> Web Mercator
     lanes = {r: k for k, r in enumerate(sorted(data))}
 
     # vertex events are logged only when the vertex changes, so a parked robot logs nothing:
@@ -352,24 +506,47 @@ def animate(ev, out, args, with_flows):
     print(f"  {stem}: {len(frames)} frames ({len(frames) / args.fps:.0f} s of video at x{args.speed:g})")
 
     bg = np.array(list(pos.values()))
+    t_lo = min(d["t"].min() for d in ev.values())
+    t_hi = max(d["t"].max() for d in ev.values())
+    live = not args.static_graph
     if strip:
         fig, ax = plt.subplots(figsize=(12, 1.8 + 1.0 * len(lanes)), dpi=110)
         x0, x1 = bg[:, 0].min(), bg[:, 0].max()
-        for r, k in lanes.items():
-            ax.plot([x0, x1], [-k, -k], "-", color="#dddddd", lw=6, solid_capstyle="round", zorder=1)
+        for r, k in lanes.items():                    # live: no lane bar, it would show the route ahead
+            ax.axhline(-k, color="#f2f2f2" if live else "#dddddd", lw=0.8 if live else 6, zorder=0)
         ax.set_xlim(x0 - 10, x1 + 10)
         ax.set_ylim(-len(lanes) + 0.4, 1.6)                     # headroom for the transfer list
         ax.set_yticks([-k for k in lanes.values()], [name(r) for r in lanes])
         ax.set_xlabel("distance along the teach sequences (m, from vertex ids; schematic)")
     else:
         fig, ax = plt.subplots(figsize=(9, 7.5), dpi=110)
-        ax.plot(bg[:, 0], bg[:, 1], ".", color="#cfcfcf", ms=2, zorder=1)
-        span = max(np.ptp(bg[:, 0]), np.ptp(bg[:, 1]), 10.0)
-        ax.set_xlim(bg[:, 0].min() - 0.06 * span, bg[:, 0].max() + 0.06 * span)
-        ax.set_ylim(bg[:, 1].min() - 0.06 * span, bg[:, 1].max() + 0.06 * span)
-        ax.set_aspect("equal")
-        ax.set_xlabel("x (m)")
-        ax.set_ylabel("y (m)")
+        draw_map(ax, bg, geo, args, graph=not live)
+
+    # the graph, drawn as it is taught and coloured by the robot that taught it
+    graph = []          # (artist, reveal times sorted, xs, ys) per teaching robot (and per lane in strip mode)
+    if live:
+        rt = reveal_times(ev, pos.keys(), stamps, t_lo, t_hi)
+        rows = [(-k) for k in lanes.values()] if strip else [None]
+        on_imagery = geo is not None and args.basemap != "none"
+        import matplotlib.patheffects as pe
+        outline = [pe.withStroke(linewidth=3, foreground="black", alpha=0.6)] if on_imagery else None
+        for r in sorted({teacher_of(v) for v in pos}):
+            vs = sorted((rt[v], v) for v in pos if teacher_of(v) == r)
+            times = np.array([t for t, _ in vs])
+            xy = np.array([pos[v] for _, v in vs])
+            before = np.isneginf(times)
+            keep = ~np.isposinf(times)                 # taught after the recording: never drawn
+            times, xy, before = times[keep], xy[keep], before[keep]
+            for y in rows:
+                ys = xy[:, 1] if y is None else np.full(len(xy), float(y))
+                if before.any():                       # taught before the recording: there from the start
+                    ax.plot(xy[before, 0], ys[before], ".", ms=1.5 if y is None else 3, color=color(r),
+                            alpha=0.5, zorder=1, path_effects=outline)
+                art, = ax.plot([], [], ".", ms=2.5 if y is None else 4, color=color(r), alpha=0.95, zorder=1, path_effects=outline)
+                graph.append((art, times[~before], xy[~before, 0], ys[~before]))
+        ax.text(0.99, 0.01, "graph drawn as it is taught; colour = robot that taught it",
+                transform=ax.transAxes, ha="right", va="bottom", fontsize=7,
+                color="white" if (geo is not None and args.basemap != "none") else "#555", zorder=6)
 
     dots, trails, labels = {}, {}, {}
     for r in tracks:
@@ -377,8 +554,11 @@ def animate(ev, out, args, with_flows):
         dots[r], = ax.plot([], [], "o", color=LINE_COLORS.get(r, "#999"), ms=11, mec="black", mew=0.8,
                            zorder=4, label=name(r))
         labels[r] = ax.text(0, 0, "", fontsize=8, zorder=5)
+        if not strip:                                   # readable on imagery and on white
+            import matplotlib.patheffects as pe
+            labels[r].set_path_effects([pe.withStroke(linewidth=2.5, foreground="white")])
     if not strip:
-        ax.legend(loc="upper right", fontsize=8)
+        ax.legend(loc="upper left", fontsize=8, framealpha=0.85)   # transfer list sits upper right
     title = ax.set_title("00:00:00 UTC", pad=14)
     note = ax.text(0.0, 1.01, "", transform=ax.transAxes, fontsize=8, color="#b00020")
     flow_box = ax.text(0.99, 0.97, "", transform=ax.transAxes, ha="right", va="top", fontsize=8,
@@ -394,6 +574,9 @@ def animate(ev, out, args, with_flows):
 
     def draw(i):
         T = frames[i]
+        for art, times, xs, ys in graph:
+            n = np.searchsorted(times, T, side="right")
+            art.set_data(xs[:n], ys[:n])
         title.set_text(f"{'Robot positions and transfers' if with_flows else 'Robot positions'}   "
                        f"{fmt_t(T)} UTC   (x{args.speed:g})")
         if i in jumps:
@@ -420,7 +603,7 @@ def animate(ev, out, args, with_flows):
                 right = p[0] > x0 + 0.75 * (x1 - x0)
                 labels[r].set_position((p[0] - off if right else p[0] + off, p[1] + off))
                 labels[r].set_horizontalalignment("right" if right else "left")
-                labels[r].set_text(ROBOT_NAMES.get(r, str(r)))
+                # labels[r].set_text(ROBOT_NAMES.get(r, str(r)))
 
         if with_flows:
             for a in arrows:
@@ -473,7 +656,8 @@ def main():
     ap.add_argument("logs", nargs="+", help="log files or directories (all robots, all rotated parts)")
     ap.add_argument("-o", "--out", default="figures")
     ap.add_argument("--positions", help="vid,x,y CSV from export_vertex_positions.py")
-    ap.add_argument("--only", default="fig1,fig2,fig3,anim3,anim4")
+    ap.add_argument("--only", default="fig1,fig2,fig3,anim3,anim4",
+                    help="comma list of fig1,fig2,fig3,anim3,anim4,map_check")
     ap.add_argument("--fmt", default="png,pdf", help="figure formats")
     ap.add_argument("--bin", type=float, default=10.0, help="rate bin for fig2 (s)")
     ap.add_argument("--piece_size", type=float, default=2 * 2**20, help="seeder PIECE_SIZE (bytes)")
@@ -485,6 +669,21 @@ def main():
     ap.add_argument("--max_frames", type=int, default=0, help="cap frames (for a quick preview)")
     ap.add_argument("--gif", action="store_true", help="write GIFs instead of MP4")
     ap.add_argument("--frame_at", help="HH:MM:SS (UTC): write one still of each animation at that time")
+    ap.add_argument("--static_graph", action="store_true",
+                    help="draw the whole teach graph from the first frame (grey) instead of as it is taught")
+    g = ap.add_argument_group("satellite basemap (needs --positions)")
+    g.add_argument("--origin", nargs=3, type=float, metavar=("LAT", "LON", "THETA"),
+                   help="root vertex: latitude, longitude (deg) and heading THETA (rad, CCW from east), "
+                        "as in VTR's MapInfo / graph_projection")
+    g.add_argument("--map_scale", type=float, default=1.0, help="MapInfo scale (default 1)")
+    g.add_argument("--rotate_deg", type=float, default=0.0, help="extra rotation to fine-tune alignment")
+    g.add_argument("--flip_y", action="store_true", help="mirror the root frame's y axis (if the path is mirrored)")
+    g.add_argument("--offset_m", nargs=2, type=float, default=(0.0, 0.0), metavar=("EAST", "NORTH"),
+                   help="shift in metres to fine-tune alignment")
+    g.add_argument("--basemap", default="Esri.WorldImagery",
+                   help="contextily provider (Esri.WorldImagery, OpenStreetMap.Mapnik, ...) or 'none'")
+    g.add_argument("--tile_cache", default=os.path.expanduser("~/.cache/ttr_tiles"),
+                   help="tile cache directory (downloads once, re-renders offline)")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -517,6 +716,8 @@ def main():
         print("  totals received: " + ", ".join(f"{k} {v / MB:,.2f} MB" for k, v in tot.items()))
     if "fig3" in only and "xfer" in ev:
         fig3_upload(ev, t0, args.out, fmts)
+    if "map_check" in only:
+        map_check(ev, args.out, args)
     if "anim3" in only:
         animate(ev, args.out, args, with_flows=False)
     if "anim4" in only and "xfer" in ev:
