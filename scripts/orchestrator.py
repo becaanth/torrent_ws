@@ -39,6 +39,8 @@ def cascade_ip_filter(robot_id, order=CONVOY_ORDER, addrs=ROBOT_ADDRS):
         for ip in addrs[r]:
             f.add_rule(ip, ip, 0)                                       # allow
     logging.info(f"cascade: robot {robot_id} may connect only to {neighbours}")
+    p = lt.port_filter()
+
     return f
 
 class Orchestrator:
@@ -84,6 +86,8 @@ class Orchestrator:
             "enable_incoming_utp": False,
             "alert_mask": alert_mask,
             "peer_fingerprint": f"-TT{int(robot_id):02d}00-",   # lets other robots name this peer
+            "min_reconnect_time": 1,     # s between retries to a peer (default 60): neighbours often join a
+            "max_failcount": 1000,       # keep retrying neighbours instead of giving up after 3 refusals
         })
         if policy == 'cascading':
             self.t_ses.set_ip_filter(cascade_ip_filter(robot_id))
@@ -137,7 +141,7 @@ class Orchestrator:
             robot_id=robot_id,
             policy = self.policy,
             pol_param=self.pol_param,
-            poll_hz=1/5,
+            poll_hz=1/1,
             t_ses=self.t_ses,
             t_lock=self.t_lock,
             on_metadata_received=self.handle_metadata_received,
