@@ -20,6 +20,26 @@ from torrent.piece_pickers import (
 from utils import *
 
 LT_PORT = 5204
+CONVOY_ORDER = [0, 1, 2, 3]          # head (teacher) first
+ROBOT_ADDRS = {
+    0: ["192.168.2.42"],
+    1: ["192.168.3.42"],
+    2: ["192.168.4.42"],
+    3: ["192.168.5.42"],
+}
+
+def cascade_ip_filter(robot_id, order=CONVOY_ORDER, addrs=ROBOT_ADDRS):
+    """Allow BitTorrent connections only to the robots directly ahead of and behind this one."""
+    f = lt.ip_filter()
+    f.add_rule("0.0.0.0", "255.255.255.255", 1)                         # block all IPv4
+    f.add_rule("::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", 1)      # block all IPv6
+    i = order.index(int(robot_id))
+    neighbours = [r for r in order[max(0, i - 1): i + 2] if r != int(robot_id)]
+    for r in neighbours:
+        for ip in addrs[r]:
+            f.add_rule(ip, ip, 0)                                       # allow
+    logging.info(f"cascade: robot {robot_id} may connect only to {neighbours}")
+    return f
 
 class Orchestrator:
     """
@@ -65,6 +85,8 @@ class Orchestrator:
             "alert_mask": alert_mask,
             "peer_fingerprint": f"-TT{int(robot_id):02d}00-",   # lets other robots name this peer
         })
+        if policy == 'cascading':
+            self.t_ses.set_ip_filter(cascade_ip_filter(robot_id))
 
         # posegraph -> pieces
         self.dec = Deconstitutor(
