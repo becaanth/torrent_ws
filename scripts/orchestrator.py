@@ -39,8 +39,6 @@ def cascade_ip_filter(robot_id, order=CONVOY_ORDER, addrs=ROBOT_ADDRS):
         for ip in addrs[r]:
             f.add_rule(ip, ip, 0)                                       # allow
     logging.info(f"cascade: robot {robot_id} may connect only to {neighbours}")
-    p = lt.port_filter()
-
     return f
 
 class Orchestrator:
