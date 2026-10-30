@@ -94,6 +94,9 @@ def debug_piece(db_path):
         print(f"pointmap_ptr: map_vid {read_id(pointmap_ptr.map_vid)}, this_vid {read_id(pointmap_ptr.this_vid)}")
         pointmap_ptrs.append(pointmap_ptr)
 
+    pointmap = poll_data['pointmap']['data'].iloc[0]
+    pdb.set_trace()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Teach, Torrent, Repeat Agent")
     parser.add_argument('-p', '--posegraph', required=True,help="Bag name (subdirectory under folder_path)")
