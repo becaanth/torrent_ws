@@ -432,7 +432,7 @@ def map_check(ev, out, args):
         for r, d in ev["vertex"].groupby("robot"):
             xy = np.array([pos[int(v)] for v in d["vid"].astype("uint64") if int(v) in pos])
             if len(xy):
-                ax.plot(xy[:, 0], xy[:, 1], ".", ms=3, color=color(r), zorder=3, label=f"visited by {name(r)}")
+                ax.plot(xy[:, 0], xy[:, 1], ".", ms=3, color=color(r), zorder=10, label=f"visited by {name(r)}")
     ax.legend(loc="upper right", fontsize=8)
     ax.set_title(f"map check: root ({geo.lat:.6f}, {geo.lon:.6f}), theta {math_deg(geo.theta):.1f} deg CCW from east")
     path = os.path.join(out, "map_check.png")
@@ -620,9 +620,9 @@ def animate(ev, out, args, with_flows):
                     w = 1.0 + 7.0 * min(1.0, rate / max(peak / win, 1.0))
                     arr = FancyArrowPatch(tuple(here[s]), tuple(here[d]), arrowstyle="-|>",
                                           mutation_scale=10 + 2 * w, lw=w, color=color(s), alpha=0.75,
-                                          connectionstyle="arc3,rad=0.15", zorder=3,
+                                          connectionstyle="arc3,rad=0.15", zorder=10,
                                           shrinkA=8, shrinkB=8)
-                    ax.add_patch(arr)
+                    ax.add_artist(arr)
                     arrows.append(arr)
             flow_box.set_text("\n".join(lines[:6]))
             flow_box.set_visible(bool(lines))
