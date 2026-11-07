@@ -31,7 +31,7 @@ import matplotlib.pyplot as plt
 from matplotlib import animation
 import numpy as np
 
-ROBOT_NAMES = {0: "mr_green", 1: "prof_plum", 2: "col_mustard", 3: "mrs_peacock"}
+ROBOT_NAMES = {0: "Robot 0", 1: "Robot 1", 2: "Robot 2", 3: "Robot 3"}
 ROBOT_COLORS = ["#3cb44b", "#911eb4", "#ffe119", "#4363d8", "#e6194b", "#f58231", "#bfef45", "#42d4f4",
                 "#f032e6", "#fabebe", "#ffd8b1", "#fffac8", "#aaffc3", "#a9a9a9", "#ffffff", "#000000"]
 MINOR_SPACING = 0.3   # m, schematic layout only (vertex_test max_translation)
