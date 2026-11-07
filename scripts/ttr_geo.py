@@ -57,33 +57,89 @@ def to_mercator_dict(pos, geo):
     xy = geo.to_mercator(np.array([pos[k] for k in keys]))
     return {k: (float(p[0]), float(p[1])) for k, p in zip(keys, xy)}
 
-def add_satellite(ax, source="Esri.WorldImagery", zoom="auto", cache_dir=None, attribution=True):
+class ViewRotation:
+    """
+    Display-only rotation of the map: Web Mercator points are turned `deg` degrees CCW about `center`,
+    so a route network lying along a diagonal can be laid out wide. Distances are unchanged, so the
+    scale bar still holds; north is no longer up (see add_north_arrow).
+    """
+
+    def __init__(self, deg, center):
+        self.deg = float(deg)
+        self.center = np.asarray(center, dtype=float)
+        c, s = math.cos(math.radians(self.deg)), math.sin(math.radians(self.deg))
+        self.R = np.array([[c, -s], [s, c]])
+
+    def apply(self, xy):
+        """(N, 2) Web Mercator -> (N, 2) rotated view coordinates."""
+        xy = np.atleast_2d(np.asarray(xy, dtype=float))
+        return (xy - self.center) @ self.R.T + self.center
+
+    def inverse(self, xy):
+        """(N, 2) rotated view coordinates -> (N, 2) Web Mercator."""
+        xy = np.atleast_2d(np.asarray(xy, dtype=float))
+        return (xy - self.center) @ self.R + self.center
+
+    def mpl_transform(self, ax):
+        """Matplotlib transform that draws Web Mercator data (e.g. an image) into the rotated view."""
+        from matplotlib.transforms import Affine2D
+        return Affine2D().rotate_deg_around(self.center[0], self.center[1], self.deg) + ax.transData
+
+
+def add_satellite(ax, source="Esri.WorldImagery", zoom="auto", cache_dir=None, attribution=True, view=None):
+    """Satellite tiles under the current axes limits. With a ViewRotation the limits are in the rotated
+    view: tiles are fetched for the Web Mercator box around the whole view and drawn rotated."""
     import contextily as ctx
     if cache_dir:
         ctx.set_cache_dir(cache_dir)
     provider = ctx.providers
     for part in source.split("."):
         provider = provider[part]
+    attr = provider.get("attribution", "") if attribution else False
+    if not attribution:
+        print(f"  imagery attribution left off the figure; credit it in the caption: "
+              f"\"{provider.get('attribution', source)}\"")
     try:
-        ctx.add_basemap(ax, crs="EPSG:3857", source=provider, zoom=zoom,
-                        attribution=provider.get("attribution", "") if attribution else False,
-                        attribution_size=6, zorder=0)
-        if ax.images:
-            im = ax.images[-1]
-            from matplotlib.patches import PathPatch
-            from matplotlib.path import Path
-            import numpy as np
-            x0, x1 = ax.get_xlim()
-            y0, y1 = ax.get_ylim()
-            verts = [(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)]
-            clip = PathPatch(Path(verts), transform=ax.transData, visible=False)
-            ax.add_patch(clip)
-            im.set_clip_path(clip)
-            print(f"  [debug] clip_path: {im.get_clip_path()}")
-            print(f"  [debug] can_composite: {im.can_composite()}")
+        if view is None:
+            ctx.add_basemap(ax, crs="EPSG:3857", source=provider, zoom=zoom,
+                            attribution=attr, attribution_size=6, zorder=0)
+            return True
+        x0, x1 = ax.get_xlim()
+        y0, y1 = ax.get_ylim()
+        corners = view.inverse([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])
+        (w, s), (e, n) = corners.min(axis=0), corners.max(axis=0)
+        img, ext = ctx.bounds2img(w, s, e, n, zoom=zoom, source=provider, ll=False)
+        ax.imshow(img, extent=ext, origin="upper", interpolation="bilinear", zorder=0,
+                  transform=view.mpl_transform(ax))      # clipped to the axes box like any artist
+        ax.set_xlim(x0, x1)                              # imshow autoscales; keep the view
+        ax.set_ylim(y0, y1)
+        if attr:
+            ctx.add_attribution(ax, attr, font_size=6)
+        return True
     except Exception as e:
         print(f"  basemap unavailable ({type(e).__name__}: {str(e)[:100]}); continuing without imagery")
         return False
+
+
+def add_north_arrow(ax, view, center=(0.07, 0.80), length_pt=26):
+    """Arrow and 'N' pointing to true north for a rotated view, centred at `center` (axes fractions).
+    The arrow is laid out in points (isotropic), so its direction holds whatever the axes' final shape."""
+    import matplotlib.patheffects as pe
+    from matplotlib.transforms import offset_copy
+    a = math.radians(90.0 + view.deg)                    # north in the view, CCW from the view's x axis
+    ux, uy = math.cos(a), math.sin(a)
+    h = length_pt / 2
+
+    def at(d):                                           # `center` moved d points towards north
+        return offset_copy(ax.transAxes, fig=ax.figure, x=d * ux, y=d * uy, units="points")
+
+    stroke = [pe.withStroke(linewidth=3, foreground="black")]
+    ax.annotate("", xy=center, xycoords=at(h), xytext=center, textcoords=at(-h), zorder=8,
+                annotation_clip=False,
+                arrowprops=dict(arrowstyle="-|>,head_width=0.35,head_length=0.7", color="white", lw=2,
+                                shrinkA=0, shrinkB=0, path_effects=stroke))
+    ax.text(*center, "N", transform=at(h + 9), ha="center", va="center", fontsize=10, fontweight="bold",
+            color="white", zorder=8, path_effects=stroke)
 
 
 def add_scalebar(ax, geo, length_m=None):

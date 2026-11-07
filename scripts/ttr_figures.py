@@ -31,7 +31,7 @@ import sys
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib import animation
+from matplotlib import animation, colors as mcolors
 from matplotlib.patches import FancyArrowPatch
 import numpy as np
 import pandas as pd
@@ -47,13 +47,65 @@ LINE_COLORS = dict(enumerate(ROBOT_COLORS))
 LINE_COLORS[2] = "#d9a900"                      # col_mustard: darker yellow so lines read on white
 TYPE_COLORS = {"pieces": "#1f4e79", "metadata": "#c55a11", "gossip": "#7f7f7f"}
 
+ROBOT_ADDRS = {
+    'mr_green':'192.168.2.42',
+    'prof_plum':'192.168.3.42',
+    'col_mustard':'192.168.4.42',
+    'mrs_peacock':'192.168.5.42' 
+}
+
+import shutil
+if shutil.which("ffmpeg") is None:
+    try:
+        import imageio_ffmpeg
+        matplotlib.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        pass   # falls through to matplotlib's own error; use --gif instead
+
+class PaletteGifWriter(animation.PillowWriter):
+    """
+    GIF writer that keeps the plot colours exact on satellite imagery.
+
+    A GIF frame can hold only 256 colours. Pillow picks them per frame from the whole image, so the
+    imagery takes nearly all of them and the small robot dots and graph vertices get mapped to the
+    nearest imagery colour. Here the plot's own colours are reserved in one shared palette, the rest
+    of the palette is fitted to the imagery, and every frame is mapped onto that palette.
+    """
+
+    def __init__(self, keep_colors, fps=5, **kw):
+        super().__init__(fps=fps, **kw)
+        keep = []
+        for c in keep_colors:
+            rgb = tuple(int(round(255 * x)) for x in mcolors.to_rgb(c))
+            if rgb not in keep:
+                keep.append(rgb)
+        self._keep = keep[:128]
+
+    def finish(self):
+        from PIL import Image
+        frames = [f.convert("RGB") for f in self._frames]
+        # fit the free palette slots to the background: first and last frame side by side
+        a, b = frames[0], frames[-1]
+        both = Image.new("RGB", (a.width + b.width, max(a.height, b.height)))
+        both.paste(a, (0, 0))
+        both.paste(b, (a.width, 0))
+        n_free = 256 - len(self._keep)
+        fitted = both.quantize(colors=n_free, method=Image.Quantize.MEDIANCUT).getpalette()[:3 * n_free]
+        fitted += [0] * (3 * n_free - len(fitted))
+        pal = [v for rgb in self._keep for v in rgb] + fitted
+        ref = Image.new("P", (1, 1))
+        ref.putpalette(pal)
+        q = [f.quantize(palette=ref, dither=Image.Dither.NONE) for f in frames]
+        q[0].save(self.outfile, save_all=True, append_images=q[1:], duration=int(1000 / self.fps),
+                  loop=0, optimize=False)
+
 
 def name(r):
     try:
         r = int(r)
     except (TypeError, ValueError):
         return "unknown"
-    return f"{ROBOT_NAMES.get(r, 'robot')} ({r})"
+    return f"{ROBOT_NAMES.get(r, 'robot')}"
 
 
 def color(r):
@@ -212,7 +264,10 @@ def fig2_bandwidth(ev, t0, t1, out, fmts, bin_s):
     if "metadata" in ev:
         series["metadata"] = (ev["metadata"]["t"].to_numpy(), ev["metadata"]["bytes"].to_numpy())
     if "gossip_rx" in ev:
-        series["gossip"] = (ev["gossip_rx"]["t"].to_numpy(), ev["gossip_rx"]["bytes"].to_numpy())
+        g = ev["gossip_rx"]
+        own_ip = g["robot"].map(lambda r: ROBOT_ADDRS.get(int(r)))   # robot -> its own IP
+        g = g[g["via_ip"] != own_ip]                                  # self-echoes never hit the radio
+        series["gossip"] = (g["t"].to_numpy(), g["bytes"].to_numpy())
 
     edges = np.arange(t0, t1 + bin_s, bin_s)
     centers = minutes(edges[:-1] + bin_s / 2, t0)
@@ -315,17 +370,45 @@ def to_mercator_dict(pos, geo):
     return f(pos, geo)
 
 
-def draw_map(ax, bg, geo, args, graph=True):
-    """Teach graph (grey, or white over imagery) with limits, aspect, labels and optional satellite basemap."""
+def video_frame(aspect, height=1080, dpi=150):
+    """--aspect W:H -> (figure size in inches, dpi) giving an exact W:H frame of `height` px (even width)."""
+    w, h = (float(x) for x in aspect.split(":"))
+    px_w = int(round(height * w / h / 2)) * 2
+    return (px_w / dpi, height / dpi), dpi
+
+
+def fit_limits_to_box(ax, box_aspect):
+    """Widen the x or y limits about their centre so the data has the axes box's width/height ratio:
+    with equal scaling the map then fills the whole box (and the imagery is fetched for all of it)."""
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    w, h = x1 - x0, y1 - y0
+    if w / h < box_aspect:
+        cx, w = (x0 + x1) / 2, h * box_aspect
+        ax.set_xlim(cx - w / 2, cx + w / 2)
+    else:
+        cy, h = (y0 + y1) / 2, w / box_aspect
+        ax.set_ylim(cy - h / 2, cy + h / 2)
+
+
+def draw_map(ax, bg, geo, args, graph=True, box_aspect=None, view=None):
+    """Teach graph (grey, or white over imagery) with limits, aspect, labels and optional satellite basemap.
+    box_aspect: width/height of the axes in pixels; if given the limits are widened to fill it.
+    view: ttr_geo.ViewRotation; bg is then already in the rotated view, and the imagery is rotated to match."""
     span = max(np.ptp(bg[:, 0]), np.ptp(bg[:, 1]), 10.0)
     ax.set_xlim(bg[:, 0].min() - 0.06 * span, bg[:, 0].max() + 0.06 * span)
     ax.set_ylim(bg[:, 1].min() - 0.06 * span, bg[:, 1].max() + 0.06 * span)
-    ax.set_aspect("equal")
+    if box_aspect:
+        fit_limits_to_box(ax, box_aspect)                # before the imagery, so tiles cover the full box
+    ax.set_aspect("equal", adjustable="datalim" if box_aspect else "box")
     imagery = False
     if geo is not None and args.basemap != "none":
-        from ttr_geo import add_satellite, add_scalebar
-        imagery = add_satellite(ax, source=args.basemap, cache_dir=args.tile_cache)
-        add_scalebar(ax, geo)
+        from ttr_geo import add_satellite, add_scalebar, add_north_arrow
+        imagery = add_satellite(ax, source=args.basemap, cache_dir=args.tile_cache, view=view,
+                                attribution=not args.no_attribution)
+        add_scalebar(ax, geo)                            # rotation keeps distances, so the bar holds
+        if view is not None and view.deg % 360:
+            add_north_arrow(ax, view)
         ax.set_xticks([])
         ax.set_yticks([])
     else:
@@ -420,25 +503,41 @@ def map_check(ev, out, args):
         print("  map_check needs --origin LAT LON THETA")
         return
     pos = to_mercator_dict(pos, geo)
+    root = geo.to_mercator([[0.0, 0.0]])[0]
+    view = None
+    if args.rotate_fig_deg % 360:                        # display rotation: turn the points, not the PNG
+        from ttr_geo import ViewRotation
+        xy = np.array(list(pos.values()))
+        view = ViewRotation(args.rotate_fig_deg, (xy.min(axis=0) + xy.max(axis=0)) / 2)
+        pos = dict(zip(pos, map(tuple, view.apply(xy))))
+        root = view.apply(root)[0]
     bg = np.array(list(pos.values()))
-    fig, ax = plt.subplots(figsize=(9, 7.5), dpi=150)
-    draw_map(ax, bg, geo, args, graph=False)
+    w, h = np.ptp(bg[:, 0]), np.ptp(bg[:, 1])
+    width = 9.0                                          # figure takes the map's shape (after rotation)
+    fig, ax = plt.subplots(figsize=(width, float(np.clip(width * h / max(w, 1.0), 2.5, 12.0))), dpi=150)
+    draw_map(ax, bg, geo, args, graph=False, view=view)
     for r in sorted({teacher_of(v) for v in pos}):
         xy = np.array([p for v, p in pos.items() if teacher_of(v) == r])
         ax.plot(xy[:, 0], xy[:, 1], ".", ms=1.5, color=color(r), alpha=0.6, zorder=1, label=f"taught by {name(r)}")
-    root = geo.to_mercator([[0.0, 0.0]])[0]
     ax.plot(*root, marker="*", ms=14, color="red", mec="black", zorder=5, label="root vertex")
     if "vertex" in ev:
         for r, d in ev["vertex"].groupby("robot"):
             xy = np.array([pos[int(v)] for v in d["vid"].astype("uint64") if int(v) in pos])
-            if len(xy):
-                ax.plot(xy[:, 0], xy[:, 1], ".", ms=3, color=color(r), zorder=10, label=f"visited by {name(r)}")
-    ax.legend(loc="upper right", fontsize=8)
-    ax.set_title(f"map check: root ({geo.lat:.6f}, {geo.lon:.6f}), theta {math_deg(geo.theta):.1f} deg CCW from east")
-    path = os.path.join(out, "map_check.png")
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  wrote map_check.png")
+            # if len(xy):
+            #     ax.plot(xy[:, 0], xy[:, 1], ".", ms=3, color=color(r), zorder=10, label=f"visited by {name(r)}")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.4, 1.0), fontsize=8)
+    if args.no_axis_labels:
+        hide_axis_labels(ax)
+    if not args.no_title:
+        ax.set_title(f"map check: root ({geo.lat:.6f}, {geo.lon:.6f}), theta {math_deg(geo.theta):.1f} deg CCW from east")
+    save(fig, out, "map_check", args.fmt.split(","))
+
+
+def hide_axis_labels(ax, keep_y_ticklabels=False):
+    """--no_axis_labels: no axis titles, ticks or tick labels (the frame stays)."""
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.tick_params(bottom=False, labelbottom=False, left=keep_y_ticklabels, labelleft=keep_y_ticklabels)
 
 
 def math_deg(rad):
@@ -462,16 +561,55 @@ def strip_positions(vids):
     return {v: (base[v >> 16] + (v & 0xFFFF) * MINOR_SPACING, 0.0) for v in vids}
 
 
+def root_vid(ev, pos=None):
+    """The graph root: the vertex at the origin of the positions file. Without one, the first vertex
+    of the teach run that robots most often report first (T&R reports the root when it starts)."""
+    if pos:
+        return min(pos, key=lambda k: pos[k][0] ** 2 + pos[k][1] ** 2)
+    v = ev["vertex"].sort_values("t")
+    firsts = v.groupby("robot")["vid"].first().astype("uint64")
+    return (int(firsts.mode().iloc[0]) >> 16) << 16
+
+
+def drop_restart_reports(v, root, gap):
+    """
+    When T&R starts (or restarts after a crash) it reports the root vertex before it has localised.
+    After a crash that single report makes the robot look like it jumped home. Drop a root event when
+    the robot had already been silent for more than `gap` s before it and stays silent for more than
+    `gap` s after it (or for the rest of the log). Real passes through the root have neighbouring
+    vertex events within a few seconds, and the very first report of a log has nothing before it,
+    so both are kept.
+    """
+    keep = []
+    for r, d in v.groupby("robot", sort=False):
+        d = d.sort_values("t")
+        t = d["t"].to_numpy(dtype=float)
+        vid = d["vid"].astype("uint64").to_numpy()
+        before = np.r_[np.inf, np.diff(t)]           # inf: no earlier event
+        after = np.r_[np.diff(t), np.inf]            # inf: no later event
+        bad = (vid == np.uint64(root)) & np.isfinite(before) & (before > gap) & (after > gap)
+        for t_bad in t[bad]:
+            print(f"  {name(r)}: ignoring root report at {fmt_t(t_bad)} UTC "
+                  f"(T&R restart, not a localisation); holding the last localised vertex")
+        keep.append(d[~bad])
+    return pd.concat(keep).sort_values("t")
+
+
 def animate(ev, out, args, with_flows):
     stem = "anim4_transfers" if with_flows else "anim3_positions"
+    bare = args.bare
+    if bare:   # just the map: no title, axes, legends, captions or margins
+        stem += "_bare"
+        args = argparse.Namespace(**{**vars(args), "no_title": True, "no_axis_labels": True})
     if "vertex" not in ev or not len(ev["vertex"]):
         print(f"  skipped {stem}: no vertex events")
         return
-    v = ev["vertex"].sort_values("t")
+    strip = not args.positions
+    pos_file = read_positions(args.positions) if args.positions else None
+    v = drop_restart_reports(ev["vertex"], root_vid(ev, pos_file), args.gap)
     data = {int(r): (d["t"].to_numpy(), d["vid"].astype("uint64").to_numpy()) for r, d in v.groupby("robot")}
     all_vids = np.unique(v["vid"].astype("uint64"))
-    strip = not args.positions
-    pos = read_positions(args.positions) if args.positions else strip_positions(all_vids)
+    pos = pos_file if args.positions else strip_positions(all_vids)
     stamps = read_stamps(args.positions) if args.positions else {}
     geo = make_geo(args) if not strip else None
     if geo is not None:
@@ -509,8 +647,13 @@ def animate(ev, out, args, with_flows):
     t_lo = min(d["t"].min() for d in ev.values())
     t_hi = max(d["t"].max() for d in ev.values())
     live = not args.static_graph
+    fixed_layout = False
     if strip:
-        fig, ax = plt.subplots(figsize=(12, 1.8 + 1.0 * len(lanes)), dpi=110)
+        if args.aspect:
+            size, dpi = video_frame(args.aspect)
+            fig, ax = plt.subplots(figsize=size, dpi=dpi)
+        else:
+            fig, ax = plt.subplots(figsize=(12, 1.8 + 1.0 * len(lanes)), dpi=110)
         x0, x1 = bg[:, 0].min(), bg[:, 0].max()
         for r, k in lanes.items():                    # live: no lane bar, it would show the route ahead
             ax.axhline(-k, color="#f2f2f2" if live else "#dddddd", lw=0.8 if live else 6, zorder=0)
@@ -518,18 +661,44 @@ def animate(ev, out, args, with_flows):
         ax.set_ylim(-len(lanes) + 0.4, 1.6)                     # headroom for the transfer list
         ax.set_yticks([-k for k in lanes.values()], [name(r) for r in lanes])
         ax.set_xlabel("distance along the teach sequences (m, from vertex ids; schematic)")
+    elif bare:
+        # the axes are the whole frame, no margins; without --aspect the frame takes the map's own shape
+        if args.aspect:
+            size, dpi = video_frame(args.aspect)
+        else:
+            span = max(np.ptp(bg[:, 0]), np.ptp(bg[:, 1]), 10.0)          # same limits as draw_map
+            w = np.ptp(bg[:, 0]) + 0.12 * span
+            h = np.ptp(bg[:, 1]) + 0.12 * span
+            size, dpi = video_frame(f"{w}:{h}")
+        fig = plt.figure(figsize=size, dpi=dpi)
+        ax = fig.add_axes([0, 0, 1, 1])
+        draw_map(ax, bg, geo, args, graph=not live, box_aspect=size[0] / size[1])
+        ax.set_axis_off()
+        fixed_layout = True
+    elif args.aspect:
+        # exact W:H frame (e.g. 16:9 for YouTube) with the map filling it: fixed margins instead of
+        # tight_layout, so the axes box is known before the limits are widened and the imagery fetched
+        size, dpi = video_frame(args.aspect)
+        fig = plt.figure(figsize=size, dpi=dpi)
+        labels_shown = not args.no_axis_labels and (geo is None or args.basemap == "none")
+        left = bottom = 0.06 if labels_shown else 0.01
+        top = 0.09 if not args.no_title else 0.04         # title, plus the skipped-gap note above the map
+        ax = fig.add_axes([left, bottom, 1 - left - 0.01, 1 - bottom - top])
+        box = ax.get_position()
+        draw_map(ax, bg, geo, args, graph=not live,
+                 box_aspect=(box.width * size[0]) / (box.height * size[1]))
+        fixed_layout = True
     else:
         fig, ax = plt.subplots(figsize=(9, 7.5), dpi=110)
         draw_map(ax, bg, geo, args, graph=not live)
+    if args.no_axis_labels:
+        hide_axis_labels(ax, keep_y_ticklabels=strip)   # strip lanes keep their robot names
 
     # the graph, drawn as it is taught and coloured by the robot that taught it
     graph = []          # (artist, reveal times sorted, xs, ys) per teaching robot (and per lane in strip mode)
     if live:
         rt = reveal_times(ev, pos.keys(), stamps, t_lo, t_hi)
         rows = [(-k) for k in lanes.values()] if strip else [None]
-        on_imagery = geo is not None and args.basemap != "none"
-        import matplotlib.patheffects as pe
-        outline = [pe.withStroke(linewidth=3, foreground="black", alpha=0.6)] if on_imagery else None
         for r in sorted({teacher_of(v) for v in pos}):
             vs = sorted((rt[v], v) for v in pos if teacher_of(v) == r)
             times = np.array([t for t, _ in vs])
@@ -540,13 +709,14 @@ def animate(ev, out, args, with_flows):
             for y in rows:
                 ys = xy[:, 1] if y is None else np.full(len(xy), float(y))
                 if before.any():                       # taught before the recording: there from the start
-                    ax.plot(xy[before, 0], ys[before], ".", ms=1.5 if y is None else 3, color=color(r),
-                            alpha=0.5, zorder=1, path_effects=outline)
-                art, = ax.plot([], [], ".", ms=2.5 if y is None else 4, color=color(r), alpha=0.95, zorder=1, path_effects=outline)
+                    ax.plot(xy[before, 0], ys[before], ".", ms=2.5 if y is None else 3, color=color(r),
+                            alpha=0.5, zorder=1, mew=0)
+                art, = ax.plot([], [], ".", ms=3.5 if y is None else 4, color=color(r), alpha=0.95, zorder=1, mew=0)
                 graph.append((art, times[~before], xy[~before, 0], ys[~before]))
-        ax.text(0.99, 0.01, "graph drawn as it is taught; colour = robot that taught it",
-                transform=ax.transAxes, ha="right", va="bottom", fontsize=7,
-                color="white" if (geo is not None and args.basemap != "none") else "#555", zorder=6)
+        if not bare:
+            ax.text(0.99, 0.01, "graph drawn as it is taught; colour = robot that taught it",
+                    transform=ax.transAxes, ha="right", va="bottom", fontsize=7,
+                    color="white" if (geo is not None and args.basemap != "none") else "#555", zorder=6)
 
     dots, trails, labels = {}, {}, {}
     for r in tracks:
@@ -557,9 +727,14 @@ def animate(ev, out, args, with_flows):
         if not strip:                                   # readable on imagery and on white
             import matplotlib.patheffects as pe
             labels[r].set_path_effects([pe.withStroke(linewidth=2.5, foreground="white")])
-    if not strip:
+    if not strip and not bare:
         ax.legend(loc="upper left", fontsize=8, framealpha=0.85)   # transfer list sits upper right
-    title = ax.set_title("00:00:00 UTC", pad=14)
+    def clock(T):
+        if args.elapsed:
+            s_ = int(max(0.0, T - t_lo))
+            return f"T+{s_ // 3600:02d}:{s_ % 3600 // 60:02d}:{s_ % 60:02d}"
+        return f"{fmt_t(T)} UTC"
+    title = ax.set_title("" if args.no_title else clock(frames[0] if frames else t_lo), pad=14)
     note = ax.text(0.0, 1.01, "", transform=ax.transAxes, fontsize=8, color="#b00020")
     flow_box = ax.text(0.99, 0.97, "", transform=ax.transAxes, ha="right", va="top", fontsize=8,
                        family="monospace", zorder=6,
@@ -577,16 +752,24 @@ def animate(ev, out, args, with_flows):
         for art, times, xs, ys in graph:
             n = np.searchsorted(times, T, side="right")
             art.set_data(xs[:n], ys[:n])
-        title.set_text(f"{'Robot positions and transfers' if with_flows else 'Robot positions'}   "
-                       f"{fmt_t(T)} UTC   (x{args.speed:g})")
+        if not args.no_title:
+            title.set_text(f"{'Robot positions and transfers' if with_flows else 'Robot positions'}   "
+                           f"{clock(T)}   (x{args.speed:g})")
         if i in jumps:
             note_until[0] = i + 2 * args.fps
-            note.set_text(f"no data for {jumps[i] / 60:.1f} min, skipped")
+            note.set_text("" if bare else f"no data for {jumps[i] / 60:.1f} min, skipped")
         if i > note_until[0]:
             note.set_text("")
         here = {}
         for r, (tc, xy, sp) in tracks.items():
-            p = position_at(T, tc, xy) if any(a - 1 <= T <= b + 1 for a, b in sp) and len(tc) else None
+            in_span = any(a - 1 <= T <= b + 1 for a, b in sp) and len(tc)
+            p = position_at(T, tc, xy) if in_span else None
+            if p is None and len(tc):
+                # not localised - show last known position rather than hiding
+                last = tc[tc <= T]
+                if len(last):
+                    idx = len(last) - 1
+                    p = xy[idx]
             if p is None:
                 dots[r].set_data([], [])
                 trails[r].set_data([], [])
@@ -625,26 +808,38 @@ def animate(ev, out, args, with_flows):
                     ax.add_artist(arr)
                     arrows.append(arr)
             flow_box.set_text("\n".join(lines[:6]))
-            flow_box.set_visible(bool(lines))
+            flow_box.set_visible(bool(lines) and not bare)
         return []
 
-    fig.tight_layout()
+    if not fixed_layout:
+        fig.tight_layout()
     if args.frame_at:                                    # one still instead of a video
         from datetime import datetime, timezone
-        day = datetime.fromtimestamp(frames[0], timezone.utc).date()
         hh, mm, ss = (int(x) for x in args.frame_at.split(":"))
-        T = datetime(day.year, day.month, day.day, hh, mm, ss, tzinfo=timezone.utc).timestamp()
+        if args.elapsed:                                 # HH:MM:SS since the start of the run
+            T = t_lo + 3600 * hh + 60 * mm + ss
+        else:                                            # HH:MM:SS UTC on the day of the run
+            day = datetime.fromtimestamp(frames[0], timezone.utc).date()
+            T = datetime(day.year, day.month, day.day, hh, mm, ss, tzinfo=timezone.utc).timestamp()
         frames.append(T)
         frames.sort()
         draw(frames.index(T))
         path = os.path.join(out, f"{stem}_{args.frame_at.replace(':', '')}.png")
-        fig.savefig(path, dpi=200, bbox_inches="tight")
+        if bare:                                         # the exact frame, no cropping or padding
+            fig.savefig(path, dpi=fig.dpi)
+        else:
+            fig.savefig(path, dpi=200, bbox_inches="tight")
         plt.close(fig)
         print(f"  wrote {os.path.basename(path)}")
         return
     anim = animation.FuncAnimation(fig, draw, frames=len(frames), blit=False)
     path = os.path.join(out, stem + (".gif" if args.gif else ".mp4"))
-    writer = animation.PillowWriter(fps=args.fps) if args.gif else animation.FFMpegWriter(fps=args.fps, bitrate=3000)
+    if args.gif:   # keep the robot colours exact; see PaletteGifWriter
+        keep = list(LINE_COLORS.values()) + list(ROBOT_COLORS) + list(TYPE_COLORS.values()) + ["black", "white", "#b00020", "#555", "#999"]
+        writer = PaletteGifWriter(keep, fps=args.fps)
+    else:
+        writer = animation.FFMpegWriter(fps=args.fps, bitrate=8000 if args.aspect else 3000,
+                                        extra_args=["-pix_fmt", "yuv420p"])   # plays everywhere, incl. YouTube
     anim.save(path, writer=writer)
     plt.close(fig)
     print(f"  wrote {os.path.basename(path)}")
@@ -668,7 +863,21 @@ def main():
     ap.add_argument("--flow_window", type=float, default=5.0, help="anim4: average transfer rate over this many s")
     ap.add_argument("--max_frames", type=int, default=0, help="cap frames (for a quick preview)")
     ap.add_argument("--gif", action="store_true", help="write GIFs instead of MP4")
-    ap.add_argument("--frame_at", help="HH:MM:SS (UTC): write one still of each animation at that time")
+    ap.add_argument("--frame_at", help="HH:MM:SS: write one still of each animation at that time "
+                                       "(UTC, or time since the start of the run with --elapsed)")
+    ap.add_argument("--elapsed", action="store_true",
+                    help="animations: show time since the start of the run (T+HH:MM:SS) instead of UTC")
+    ap.add_argument("--aspect", metavar="W:H",
+                    help="animations: exact W:H video frame, 1080 px high (e.g. 16:9 for YouTube, which "
+                         "letterboxes anything else); the map is widened to fill it")
+    ap.add_argument("--no_title", action="store_true",
+                    help="animations and map_check: no title (the animation title also carries the clock)")
+    ap.add_argument("--no_axis_labels", action="store_true",
+                    help="animations and map_check: hide axis titles, ticks and tick labels")
+    ap.add_argument("--bare", action="store_true",
+                    help="write only the transfers animation (anim4), as just the map: no title, axes, "
+                         "legends, transfer list, captions or margins (the scale bar stays). "
+                         "Combine with --aspect for a fixed frame; otherwise the frame takes the map's shape")
     ap.add_argument("--static_graph", action="store_true",
                     help="draw the whole teach graph from the first frame (grey) instead of as it is taught")
     g = ap.add_argument_group("satellite basemap (needs --positions)")
@@ -682,12 +891,19 @@ def main():
                    help="shift in metres to fine-tune alignment")
     g.add_argument("--basemap", default="Esri.WorldImagery",
                    help="contextily provider (Esri.WorldImagery, OpenStreetMap.Mapnik, ...) or 'none'")
+    g.add_argument("--rotate_fig_deg", type=float, default=0.0,
+                   help="map_check: rotate the map and imagery CCW by this many degrees about the graph's "
+                        "centre (legend, scale bar and text stay upright; a north arrow is added). "
+                        "The figure takes the rotated map's shape")
+    g.add_argument("--no_attribution", action="store_true",
+                   help="leave the imagery credit off the map (it is printed instead: put it in the caption, "
+                        "as the tile provider's terms require)")
     g.add_argument("--tile_cache", default=os.path.expanduser("~/.cache/ttr_tiles"),
                    help="tile cache directory (downloads once, re-renders offline)")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
-    only = set(args.only.split(","))
+    only = {"anim4"} if args.bare else set(args.only.split(","))
     fmts = args.fmt.split(",")
 
     ev = te.load(args.logs)
@@ -702,7 +918,7 @@ def main():
     t1 = max(d["t"].max() for d in ev.values())
     print(f"\nrun: {fmt_t(t0)} -> {fmt_t(t1)} UTC ({(t1 - t0) / 60:.1f} min); writing to {args.out}/")
 
-    if "xfer" in ev:
+    if "xfer" in ev and not args.bare:
         flows(ev, 1.0).to_csv(os.path.join(args.out, "flows_1s.csv"), index=False)
         um = upload_matrix(ev)
         um.to_csv(os.path.join(args.out, "upload_matrix.csv"), index=False)
