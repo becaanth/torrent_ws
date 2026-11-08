@@ -1,5 +1,5 @@
 """
-live_deconstruct_posegraph.py
+live_deconstitution.py
 
 Mirrors the behaviour of deconstruct_posegraph.py but runs continuously,
 maintaining persistent read connections to the 7 source .db3 files and
@@ -16,7 +16,7 @@ pointmap table. Each chunk contains:
     - pointmap_ptr   (rows whose map_vid == submap vertex_id)
 
 Usage:
-    python live_deconstruct_posegraph.py -b <bag_name> [--agent 2] [--poll_hz 1]
+    python live_deconstitution.py -b <bag_name> [--agent 2] [--poll_hz 1]
 """
 
 import argparse
@@ -31,7 +31,7 @@ from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 import zstandard as zstd
 
-from .posegraph_utils import *
+from posegraph.posegraph_utils import *
 from utils import evt
 
 import pdb
@@ -425,7 +425,7 @@ class Deconstitutor:
             conn.close()
 
             size = os.path.getsize(staging_path)
-            pad_file_to_exact_size(staging_path, PIECE_SIZE)
+            # pad_file_to_exact_size(staging_path, PIECE_SIZE)
             os.rename(staging_path, final_path)
             evt("chunk", file=filename, sid=hex(sid), bytes=size)
             self._written_chunks.add(i)
