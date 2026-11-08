@@ -15,7 +15,7 @@ from .topo_codec import pack_topology, file_id_from_name
 # zenohd --cfg 'scouting/multicast/enabled:false'
 
 PORT=5204
-PIECE_SIZE = 2 * 1024 * 1024  # 1.2 MiB
+PIECE_SIZE = 0.5 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
 class MutableSeeder:
