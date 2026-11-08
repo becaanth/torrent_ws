@@ -37,7 +37,7 @@ from utils import evt
 import pdb
 
 
-PIECE_SIZE = int(1.2 * 1024 * 1024)  # 1.2 MiB
+PIECE_SIZE = int(0.5 * 1024 * 1024)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
