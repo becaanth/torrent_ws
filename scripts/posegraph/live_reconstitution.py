@@ -10,7 +10,7 @@ import bisect # to search the skeleton
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from posegraph_utils import *
+from posegraph.posegraph_utils import *
 from torrent.torrent_utils import inspect_torrent
 from utils import evt
 
