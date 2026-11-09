@@ -184,7 +184,7 @@ class MutableSeeder:
              flags=lt.create_torrent_flags_t.optimize_alignment
         ) 
 
-        t = lt.create_torrent(fs, PIECE_SIZE)        
+        t = lt.create_torrent(fs, PIECE_SIZE, lt.create_torrent.v1_only | lt.create_torrent.canonical_files)        
         lt.set_piece_hashes(t, os.path.dirname(self.input_path))
 
         torrent_dict = t.generate()

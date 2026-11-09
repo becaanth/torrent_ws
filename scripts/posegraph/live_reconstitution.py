@@ -10,7 +10,7 @@ import bisect # to search the skeleton
 from rclpy.serialization import deserialize_message, serialize_message
 from rosidl_runtime_py.utilities import get_message
 
-from .posegraph_utils import *
+from posegraph_utils import *
 from torrent.torrent_utils import inspect_torrent
 from utils import evt
 
@@ -62,25 +62,25 @@ class Reconstitutor:
 
         # topics we are writing to (+ pointmap_v0)
         self._db_relpaths = {
-                'vertices'     : f'{self.output_dir}/vertices/vertices_0.db3',
-                'edges'        : f'{self.output_dir}/edges/edges_0.db3',
                 'index'        : f'{self.output_dir}/index/index_0.db3',
                 'pointmap'     : f'{self.output_dir}/data/pointmap/pointmap_0.db3',
                 'pointmap_v0'  : f'{self.output_dir}/data/pointmap_v0/pointmap_v0_0.db3',
                 'pointmap_ptr' : f'{self.output_dir}/data/pointmap_ptr/pointmap_ptr_0.db3',
                 'waypoint_name': f'{self.output_dir}/data/waypoint_name/waypoint_name_0.db3',
-                'env_info'     : f'{self.output_dir}/data/env_info/env_info_0.db3'
+                'env_info'     : f'{self.output_dir}/data/env_info/env_info_0.db3',
+                'vertices'     : f'{self.output_dir}/vertices/vertices_0.db3',
+                'edges'        : f'{self.output_dir}/edges/edges_0.db3',
             }
 
         self.topics = {
-            'vertices'     : 'vtr_pose_graph_msgs/msg/Vertex',
-            'edges'        : 'vtr_pose_graph_msgs/msg/Edge',
             'index'        : 'vtr_pose_graph_msgs/msg/Graph',
             'pointmap'     : 'vtr_lidar_msgs/msg/PointMap',
             'pointmap_v0'  : 'vtr_lidar_msgs/msg/PointMap',
             'pointmap_ptr' : 'vtr_lidar_msgs/msg/PointMapPointer',
             'waypoint_name': 'vtr_tactic_msgs/msg/WaypointNames',
-            'env_info'     : 'vtr_tactic_msgs/msg/EnvInfo'
+            'env_info'     : 'vtr_tactic_msgs/msg/EnvInfo',
+            'vertices'     : 'vtr_pose_graph_msgs/msg/Vertex',
+            'edges'        : 'vtr_pose_graph_msgs/msg/Edge',
         }
 
         # make directories for VTR
@@ -249,8 +249,6 @@ class Reconstitutor:
                     if not poll_data:
                         continue
                     if poll_data['vertices'].empty:
-                        continue
-                    if poll_data['edges'].empty:
                         continue
                     if poll_data['pointmap'].empty:
                         continue
@@ -491,7 +489,7 @@ class Reconstitutor:
                                     f"(vid={hex(piece.top_vertices[0].vertex_id)}) -- inserting fresh row "
                                     f"instead of dropping data"
                                 )
-                                inserts.append((row_key, int(row['timestamp']), rid))  
+                                inserts.append((row_key, int(row['timestamp']), row['data']))  
                                 continue
                             updates.append((row['data'], int(row['timestamp']), rid))  
 
@@ -521,6 +519,7 @@ class Reconstitutor:
                 except Exception as e:
                     conn.execute("ROLLBACK;")
                     logging.error(f"failed writing message batch for table {k}: {e}")
+                    raise
 
     def _write_index(self, index_msg):
         # write index.db3, containing MapInfo message

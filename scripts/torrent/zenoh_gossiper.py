@@ -110,7 +110,7 @@ class ZenohGossiper:
         # Update mutable item
         zenoh_item = msgpack.unpackb(bytes(sample.payload), raw=False)
         mutable_item = {
-            'pubkey' : zenoh_item.get('pubkey'),
+            # 'pubkey' : zenoh_item.get('pubkey'),
             'robot_id' : zenoh_item.get('robot_id'),
             'seq' : zenoh_item.get('seq'),
             'infohash' : zenoh_item.get('infohash'),

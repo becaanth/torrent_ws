@@ -273,7 +273,25 @@ class Deconstitutor:
         """map_vid from vertex `vid`'s pointmap_ptr row, or None if that row hasn't been read yet."""
         rows = np.where(self._this_vids == np.uint64(vid))[0]   # np.uint64 keeps the compare exact for 64-bit ids
         return int(self._map_vids[rows[-1]]) if len(rows) else None
-    
+
+    def _next_piece_started(self, sid: int, last_v: int) -> bool:
+        """True once any later vertex in sid's teach sequence has a pointmap_ptr row.
+        VTR never points a later vertex back to an earlier submap, so this means
+        the robot has moved on and every member's rows have been flushed."""
+        if len(self._this_vids) == 0:
+            return False
+        seq = np.uint64(sid >> 16)
+        same_seq = (self._this_vids >> np.uint64(16)) == seq
+        return bool(np.any(same_seq & (self._this_vids > np.uint64(last_v))))
+
+    @staticmethod
+    def _is_ingress(e, seq: int) -> bool:
+        """Branch ingress: spatial edge from the sequence's first vertex into another sequence
+        (Tactic::connectToTrunk adds twig -> branch, so it points *out* of the new run)."""
+        f, t = int(e.from_id), int(e.to_id)
+        return ((f >> 16) == seq and extract_minor_id(f) == 0
+                and (t >> 16) != seq and e.type.type == 1)
+
     def _write_new_chunks(self):
         """
         For each submap not yet written, check if we have enough data
@@ -354,14 +372,10 @@ class Deconstitutor:
             sort_eidx   = np.argsort(self._from_ids[e_mask])
             # sort_eidx = np.where(sort_eidx!=np.max(sort_eidx))[0] # skip egress edge
             candidate_chunk_edges = self._df['edges'].iloc[candidate_edges[sort_eidx]]
-            chunk_edges = pd.DataFrame()
-
-            # prune non-manual edges
-            is_manual_mask = [
-                inspect_ros_data(row).mode.mode == 1 
-                for _, row in candidate_chunk_edges.iterrows()
-            ]
+            parsed = [inspect_ros_data(row) for _, row in candidate_chunk_edges.iterrows()]
+            is_manual_mask = [e.mode.mode == 1 for e in parsed]
             chunk_edges = candidate_chunk_edges[is_manual_mask]
+            manual_edges = [e for e, m in zip(parsed, is_manual_mask) if m]
             if len(chunk_edges) == 0:
                 # all data is autonomous, no candidate chunk edges were valid. this submap is done
                 logging.info(f"there were no chunk edges for this submap")
@@ -374,35 +388,22 @@ class Deconstitutor:
             members = {int(v) for v in relevant_vids}
             last_v = max(v for v in members if (v >> 16) == seq)
 
-            egress_rowid, egress_type = None, None
-            for _, row in chunk_edges.iterrows():              # manual edges only
-                e = inspect_ros_data(row)
-                f, t = int(e.from_id), int(e.to_id)
-                if f != last_v or t in members:                # must leave this submap from its last vertex
-                    continue
-                to_rows = np.where(self._this_vids == t)[0]
-                if len(to_rows):
-                    if int(self._map_vids[to_rows[-1]]) != sid:    # (a) next submap or (b) other sequence
-                        egress_rowid, egress_type = row['rowid'], e.type.type
-                        break
-                elif (t >> 16) != seq:                         # (b) merge onto a map we have no ptr rows for
-                    egress_rowid, egress_type = row['rowid'], e.type.type
-                    break
-                # else: to-vertex's ptr row not flushed yet -> wait, no crash
+            merged = any(
+                int(e.from_id) == last_v and (int(e.to_id) >> 16) != seq
+                and e.type.type == 1 and not self._is_ingress(e, seq)
+                for e in manual_edges
+            )
+            if not (self._next_piece_started(sid, last_v) or merged):
+                continue # robot still in this submap
+            if not members.issuperset(range(sid, last_v + 1)) or len(chunk_vtxs) < (last_v - sid + 1):
+                continue # moved on, but rows still arriving
 
-            if egress_rowid is None:
-                continue                                       # robot still in this submap
-            if members.issuperset(range(sid, last_v + 1)) is False or len(chunk_vtxs) < (last_v - sid + 1):
-                continue                                       # left, but rows still arriving
-            if egress_type == 0:                               # successor: egress belongs to the next piece
-                chunk_edges = chunk_edges[chunk_edges['rowid'] != egress_rowid]
-            # merge (type 1): keep the merge edge in this piece
-
-            first_vtx = inspect_ros_data(chunk_vtxs.iloc[0])# first vtx in the branch
-            logging.info(f"first vtx: {first_vtx.id}")
-            if len(chunk_vtxs) < 5 and extract_minor_id(first_vtx.id) == 0: # TODO: THIS IS A MAGIC NUMBER FOR BRANCHING; DRIVE IN A STRAIGHT LINE @ BRANCH
-                logging.info(f"only one vertex in this chunk - patch fix")
-                continue
+            keep = [
+                (e.type.type == 0 and int(e.to_id) in members) or
+                (e.type.type == 1 and int(e.from_id) in members)
+                for e in manual_edges
+            ]
+            chunk_edges = chunk_edges[keep]
 
             # --- write chunk ------------------------------------------------
             filename = f"{str(hex(int(sid)))[2:].zfill(16)}.db3"
