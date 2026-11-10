@@ -34,10 +34,6 @@ import zstandard as zstd
 from posegraph.posegraph_utils import *
 from utils import evt
 
-import pdb
-
-
-PIECE_SIZE = int(0.5 * 1024 * 1024)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -426,7 +422,6 @@ class Deconstitutor:
             conn.close()
 
             size = os.path.getsize(staging_path)
-            # pad_file_to_exact_size(staging_path, PIECE_SIZE)
             os.rename(staging_path, final_path)
             evt("chunk", file=filename, sid=hex(sid), bytes=size)
             self._written_chunks.add(i)
