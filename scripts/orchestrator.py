@@ -111,6 +111,7 @@ class Orchestrator:
             'pubkey': 0,
             'robot_id': self.robot_id,
             'seq': self.state['seq'],
+            'epoch': time.time_ns(),   # seq restarts with the seeder: peers order versions by (epoch, seq)
             'infohash': -1,
             'my_ip': self.my_ip,
         }
@@ -143,7 +144,9 @@ class Orchestrator:
             t_ses=self.t_ses,
             t_lock=self.t_lock,
             on_metadata_received=self.handle_metadata_received,
-            on_file_completed=self.handle_file_completed
+            on_file_completed=self.handle_file_completed,
+            fetch_diffs=self.gossiper.fetch_diffs,
+            drop_diffs=self.gossiper.diff_log.discard
         )
 
         # pieces -> posegraph
@@ -166,25 +169,29 @@ class Orchestrator:
     def handle_new_item(self, robot_id, mutable_item):
         # a new robot announced a mutable item to gossiper, notify peer (cb from gossiper to peer)
         logging.info(f"handle_new_item from robot id {robot_id}")
-        self.peer.join_torrent(robot_id, mutable_item['infohash'], mutable_item['my_ip'])
+        self.peer.join_torrent(robot_id, mutable_item['infohash'], mutable_item['my_ip'],
+                               epoch=mutable_item.get('epoch', 0), seq=mutable_item['seq'])
 
     def handle_file_completed(self, path):
         # logging.info(f"handle file completed: {path}")
         self.rec.mark_file_complete(path)
 
-    def handle_snapshot_created(self, infohash):
+    def handle_snapshot_created(self, infohash, diff=None):
         # seeder created a new snapshot (cb from seeder to gossiper)
+        # diff = D[seq], the metadata diff from the previous snapshot: published once with the item
         self.mi['seq'] += 1
         self.mi['infohash'] = infohash
         evt("snapshot", seq=self.mi['seq'], ih=bytes(infohash).hex(),
-            bytes=self.seeder.len_torrent, metadata=self.seeder.len_metadata)
+            bytes=self.seeder.len_torrent, metadata=self.seeder.len_metadata,
+            diff=len(diff) if diff is not None else 0)
         logging.info(f"seeding mutable item: robot_id={self.mi['robot_id']} seq={self.mi['seq']}")
-        self.gossiper._publish_item(self.mi)
+        self.gossiper._publish_item({**self.mi, 'diff': diff})
 
     def handle_item_updated(self, robot_id, mutable_item):
         # a known robot updated its seq, notify peer (cb from gossiper to peer)
         logging.info(f"handle_item_updated, robot id {robot_id}, seq {mutable_item['seq']}")
-        self.peer.update_torrent(robot_id, mutable_item['infohash'], mutable_item['my_ip'])
+        self.peer.update_torrent(robot_id, mutable_item['infohash'], mutable_item['my_ip'],
+                                 epoch=mutable_item.get('epoch', 0), seq=mutable_item['seq'])
 
     def handle_metadata_received(self, robot_id, topology):
         # topology update, pass to reconstitutor (cb from mutable_peer)
