@@ -6,6 +6,7 @@ import csv
 import argparse
 
 from .torrent_utils import *
+from .torrent_utils import info_patch, unpack_diff
 from .piece_pickers import get_policy, ones_filter, eval_seq
 import json
 from utils import evt
@@ -44,8 +45,8 @@ class MutablePeer:
     """
     Listen to gossip and join torrent sessions
     """
-    def __init__(self, params : dict, posegraph : str, state : dict, robot_id, policy, pol_param, t_ses, t_lock, poll_hz : float = 0.2, 
-                on_metadata_received=None, on_file_completed=None):
+    def __init__(self, params : dict, posegraph : str, state : dict, robot_id, policy, pol_param, t_ses, t_lock, poll_hz : float = 0.2,
+                on_metadata_received=None, on_file_completed=None, fetch_diffs=None, drop_diffs=None):
         
         # robot params
         self.container = params['container']
@@ -83,6 +84,13 @@ class MutablePeer:
         self._xfer = {}
         self._xfer_logged = {}      # key -> bytes at the last "xfer" event
         self._piece_len = {}        # infohash -> (piece_length, total_size) for exact last-block sizes
+
+        # metadata diffs: our own copy of each robot's last info dict, patched forward with D[seq]
+        # instead of fetching the whole info dict over ut_metadata for every seq
+        self.base = {}         # robot_id -> (epoch, seq, info dict) of the last verified metadata
+        self.ver_of_ih = {}    # infohash bytes -> (epoch, seq) it was gossiped as
+        self.fetch_diffs = fetch_diffs   # (robot, epoch, a, b) -> ({seq: blob}, wire bytes); gossiper
+        self.drop_diffs = drop_diffs     # (robot, epoch, seqs): forget diffs that failed to verify
 
         # inversion of control callbacks
         self.on_metadata_received = on_metadata_received   # pass to Reconstitutor
@@ -210,9 +218,7 @@ class MutablePeer:
         if isinstance(alert, lt.metadata_received_alert):
             handle = alert.handle
             logging.info(f"metadata received for torrent: {handle.info_hash()}")
-            self._handle_metadata_completion(handle)
-            with self.t_lock:
-                handle.unset_flags(lt.torrent_flags.upload_mode)  # now allow downloading
+            self._activate(handle)
 
         # piece/file completed
         elif isinstance(alert, lt.file_completed_alert):
@@ -326,14 +332,86 @@ class MutablePeer:
                     logging.info(f"Eval report is not ready bc {e}")
 
 
-    def join_torrent(self, robot_id, infohash, peer_ip):
+    def _activate(self, handle, via="ut_metadata", wire_bytes=None):
+        """the handle has its metadata (from ut_metadata, or built from diffs): report it, set priorities, start downloading"""
+        self._handle_metadata_completion(handle, via=via, wire_bytes=wire_bytes)
+        with self.t_lock:
+            handle.unset_flags(lt.torrent_flags.upload_mode)  # now allow downloading
+
+    def _build_from_diffs(self, robot_id, epoch, seq, infohash):
+        """
+        torrent_info for (epoch, seq) built locally: our base info dict patched with D[base+1..seq].
+        Returns (ti, wire bytes) or (None, wire bytes) when the caller must fall back to ut_metadata.
+        """
+        if self.fetch_diffs is None or seq is None:
+            return None, 0
+        base = self.base.get(robot_id)
+        if base is None or base[0] != epoch:
+            # newcomer, or the seeder restarted: rebuild this epoch from {} with D[1..seq]. About one
+            # full metadata's worth of diffs, but available at once from anyone holding the chain;
+            # waiting on ut_metadata instead could repeat every seq until one fetch finishes.
+            evt("diff_rebase", origin=robot_id, seq=seq, reason="new" if base is None else "epoch")
+            base = (epoch, 0, {})
+        b_epoch, b_seq, info = base
+        if b_seq >= seq:
+            evt("diff_fallback", origin=robot_id, seq=seq, reason="behind")
+            return None, 0
+
+        need = list(range(b_seq + 1, seq + 1))
+        got, wire = self.fetch_diffs(robot_id, epoch, need[0], need[-1])
+        if any(s not in got for s in need):
+            evt("diff_fallback", origin=robot_id, seq=seq, reason="missing",
+                missing=sum(1 for s in need if s not in got))
+            return None, wire
+        try:
+            for s in need:                                   # order from the label, not arrival
+                info = info_patch(info, unpack_diff(got[s]))
+            ti = lt.torrent_info({b"info": info})
+            ok = ti.info_hash().to_bytes() == bytes(infohash)
+        except Exception as e:
+            logging.warning(f"patching D[{need[0]}..{seq}] for robot {robot_id} failed: {e}")
+            ok = False
+        if not ok:
+            evt("diff_fallback", origin=robot_id, seq=seq, reason="verify")
+            if self.drop_diffs is not None:
+                self.drop_diffs(robot_id, epoch, need)       # don't serve them to anyone else
+            return None, wire
+        self.base[robot_id] = (epoch, seq, info)
+        # wire = only what this catch-up queried; diffs that arrived inline with gossip are
+        # counted once, in gossip_rx.diff_bytes (fig2 adds those to metadata)
+        return ti, wire
+
+    def _rekey_base(self, robot_id, epoch, seq, infohash):
+        """
+        Same infohash under a new (epoch, seq) -- a restarted seeder re-announcing unchanged files:
+        same infohash means the same info dict, so relabel the base instead of rebuilding the new
+        epoch from D[1..] at the next update. Only if the base really is this torrent's info dict.
+        """
+        self.ver_of_ih[infohash] = (epoch, seq)
+        b = self.base.get(robot_id)
+        if b is None or seq is None or (b[0], b[1]) == (epoch, seq):
+            return
+        try:
+            same = lt.torrent_info({b"info": b[2]}).info_hash().to_bytes() == infohash
+        except Exception:
+            same = False
+        if same:
+            self.base[robot_id] = (epoch, seq, b[2])
+            evt("diff_rekey", origin=robot_id, seq=seq, epoch_changed=b[0] != epoch)
+
+    def join_torrent(self, robot_id, infohash, peer_ip, epoch=0, seq=None):
         """
         join a torrent notified by gossip.on_new_item
+        a newcomer has no base: it builds the metadata from D[1..seq] if the swarm holds them
+        (update_torrent), else fetches the full info dict over ut_metadata (below)
         """
         logging.info(f"joining torrent for robot_id {robot_id}")
+        if self.fetch_diffs is not None and seq is not None:
+            return self.update_torrent(robot_id, infohash, peer_ip, epoch=epoch, seq=seq)
         self._remember_peer(peer_ip)
 
         self.known_infohash[robot_id] = bytes(infohash)
+        self.ver_of_ih[bytes(infohash)] = (epoch, seq)
         with self.t_lock:
             handle = self.t_ses.add_torrent({
                 'info_hash': infohash,
@@ -345,9 +423,11 @@ class MutablePeer:
                 handle.connect_peer((ip, p))
             self.torrent_handles[robot_id] = handle
 
-    def update_torrent(self, robot_id, infohash, peer_ip):
+    def update_torrent(self, robot_id, infohash, peer_ip, epoch=0, seq=None):
         """
         update a torrent based on gossiper.handle_new_item cb
+        with a base for this robot, the new metadata is built from diffs (no ut_metadata);
+        otherwise, or if that fails, the new torrent is added by infohash as before
         """
         self._remember_peer(peer_ip)
 
@@ -355,8 +435,14 @@ class MutablePeer:
         new_hash = bytes(infohash)
         if old_hash == new_hash:
             logging.debug(f"infohash unchanged for robot id {robot_id}")
+            self._rekey_base(robot_id, epoch, seq, new_hash)
             return
+
+        # build before touching the old handle: fetch_diffs can block on a Zenoh query
+        ti, wire = self._build_from_diffs(robot_id, epoch, seq, new_hash)
+
         self.known_infohash[robot_id] = new_hash
+        self.ver_of_ih[new_hash] = (epoch, seq)
         # remove old handle
         self.processed_metadata_hashes.discard(old_hash)
         with self.t_lock:
@@ -370,17 +456,25 @@ class MutablePeer:
                 except RuntimeError as e:
                     logging.debug(f"old handle for robot_id {robot_id} already gone: {e}")
 
-        # add new handle
+        # add new handle: with full metadata if we built it, else by infohash (ut_metadata)
+        params = {
+            'save_path': self.output_path,
+            'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
+        }
+        if ti is not None:
+            params['ti'] = ti
+        else:
+            params['info_hash'] = infohash
         with self.t_lock:
-            new_handle = self.t_ses.add_torrent({
-                'info_hash': infohash,
-                'save_path': self.output_path,
-                'flags': lt.torrent_flags.upload_mode | lt.torrent_flags.default_flags
-            })
+            new_handle = self.t_ses.add_torrent(params)
             for ip, p in self.peers:
                 logging.debug(f"attempting connect_peer to {(ip, p)}")
                 new_handle.connect_peer((ip, p))
             self.torrent_handles[robot_id] = new_handle
+
+        # no metadata_received_alert fires for a torrent added with its metadata: activate it here
+        if ti is not None:
+            self._activate(new_handle, via="diff", wire_bytes=wire)
 
     def _report_completed_file(self, handle, file_idx):
         """tell Rec. the file is fully downloaded; log first completions as new data"""
@@ -409,9 +503,10 @@ class MutablePeer:
             self.peers.append(peer_endpoint)
             logging.debug(f"added {peer_endpoint} to fleet peer list ({len(self.peers)} knwon)")
 
-    def _handle_metadata_completion(self, handle):
+    def _handle_metadata_completion(self, handle, via="ut_metadata", wire_bytes=None):
         """
         callback for metadata alerts. process metadata and send to reconstitutor
+        via: "ut_metadata" (fetched whole from the swarm) or "diff" (built locally from wire_bytes of diffs)
         """
         # get torrent info (metadata)
         logging.info(f'_handle_metadata_completion')
@@ -443,8 +538,14 @@ class MutablePeer:
         metadata = info.metadata()
         if metadata:
             self.len_metadata = len(metadata)
-            evt("metadata", ih=infohash_bytes.hex(), origin=robot_id, bytes=len(metadata),
-                pieces=num_pieces, files=num_files)
+            ver = self.ver_of_ih.get(infohash_bytes, (None, None))
+            if via == "ut_metadata" and ver[1] is not None:
+                # the full info dict becomes the base that later diffs patch forward
+                self.base[robot_id] = (ver[0], ver[1], lt.bdecode(metadata))
+            # bytes = what crossed the network for this metadata (fig2); full = its size
+            evt("metadata", ih=infohash_bytes.hex(), origin=robot_id, seq=ver[1], via=via,
+                bytes=len(metadata) if via == "ut_metadata" else int(wire_bytes or 0),
+                full=len(metadata), pieces=num_pieces, files=num_files)
             logging.info(f"Received metadata for {infohash_bytes.hex()} | Size: {self.len_metadata} bytes")
 
         # orchestrator callback

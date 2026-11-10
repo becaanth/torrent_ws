@@ -50,6 +50,11 @@ class MutableSeeder:
         self.current_handle = None
         self.len_metadata = 0
         self.len_torrent = 0
+        self.len_diff = 0
+
+        # metadata diffs: info dict of the last published snapshot ({} before the first)
+        self._prev_info = {}
+        self._last_info = {}
 
         # listen to T&R for most recent localized to submap
         self.current_vtx = 0
@@ -141,8 +146,14 @@ class MutableSeeder:
             
             logging.info(f"snapshot created with hash {ti}")
 
+            # D[seq]: what changed since the last *published* snapshot (the duplicate guard above
+            # returns before this, so an unpublished snapshot never becomes the base)
+            diff = pack_diff(info_diff(self._prev_info, self._last_info))
+            self._prev_info = self._last_info
+            self.len_diff = len(diff)
+
             if self.on_snapshot_created is not None:
-                self.on_snapshot_created(infohash.to_bytes())
+                self.on_snapshot_created(infohash.to_bytes(), diff)
                 
         with self.t_lock: 
             for handle in self.t_ses.get_torrents():
@@ -224,6 +235,7 @@ class MutableSeeder:
                 continue
             
         ti = lt.torrent_info(torrent_dict)
+        self._last_info = torrent_dict[b"info"]   # diffed against the last published snapshot in _poll
         metadata = ti.metadata()
         self.len_torrent = fs.total_size()
         if metadata:

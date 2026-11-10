@@ -1,6 +1,8 @@
 import time
 import os
 import json
+import threading
+import difflib
 import msgpack
 import libtorrent as lt
 import zenoh
@@ -27,6 +29,118 @@ DOCKER_IPS = {
     'torrent4':'172.18.0.3',
     'torrent8':'172.18.0.3',
 }
+
+# ===================================================================== METADATA DIFFS
+# Each snapshot's info dict is the previous one plus a few files. Instead of every peer fetching
+# the whole info dict over ut_metadata at every seq, the seeder publishes
+#     D[seq] = info_diff(info[seq-1], info[seq])        (D[1] is the diff from {}, i.e. everything)
+# and peers patch their own copy. Only the seeder makes diffs; everyone else stores and forwards
+# the exact blobs, labelled (robot, epoch, seq). A patched dict is trusted only if its infohash
+# matches the gossiped one, so a bad or missing diff costs a fallback to ut_metadata, never a
+# wrong torrent.
+#   dict        -> {"d": {key: sub-diff for added/changed keys}, "x": [removed keys]}
+#   list/bytes  -> {"h": [[p, q, new], ...]}: hunks, each replacing a[p:q] with new (p ascending,
+#                  non-overlapping). Several hunks because one snapshot can add files at several
+#                  places in the sorted file list (e.g. two sequences' pieces interleaved by name).
+#                  b"pieces" is matched in 20-byte SHA-1 units, so its hunks line up with files.
+#   anything    -> {"v": new value}
+SHA1_LEN = 20
+
+def _hunks(ka, kb):
+    """(i1, i2, j1, j2) for every non-equal stretch between two sequences of hashable keys"""
+    sm = difflib.SequenceMatcher(None, ka, kb, autojunk=False)   # pad entries repeat: no autojunk
+    return [(i1, i2, j1, j2) for tag, i1, i2, j1, j2 in sm.get_opcodes() if tag != "equal"]
+
+def info_diff(a, b):
+    if a == b:
+        return None
+    if isinstance(a, dict) and isinstance(b, dict):
+        return {"d": {k: info_diff(a.get(k), b[k]) for k in b if k not in a or a[k] != b[k]},
+                "x": [k for k in a if k not in b]}
+    if isinstance(a, list) and isinstance(b, list):
+        key = lambda x: msgpack.packb(x, use_bin_type=True)
+        return {"h": [[i1, i2, b[j1:j2]] for i1, i2, j1, j2 in _hunks([key(x) for x in a], [key(x) for x in b])]}
+    if isinstance(a, bytes) and isinstance(b, bytes):
+        u = SHA1_LEN if (len(a) % SHA1_LEN == 0 and len(b) % SHA1_LEN == 0 and min(len(a), len(b)) >= 10 * SHA1_LEN) else 0
+        if u:   # concatenated piece hashes
+            blocks = lambda x: [x[i:i + u] for i in range(0, len(x), u)]
+            return {"h": [[i1 * u, i2 * u, b[j1 * u:j2 * u]] for i1, i2, j1, j2 in _hunks(blocks(a), blocks(b))]}
+        n = min(len(a), len(b))      # short bytes: one hunk between common prefix and suffix
+        p = 0
+        while p < n and a[p] == b[p]:
+            p += 1
+        s = 0
+        while s < n - p and a[-1 - s] == b[-1 - s]:
+            s += 1
+        return {"h": [[p, len(a) - s, b[p:len(b) - s]]]}
+    return {"v": b}
+
+def info_patch(a, d):
+    """Apply info_diff(a, b) to a, returning b. Raises ValueError if d can't belong to a."""
+    if d is None:
+        return a
+    if "v" in d:
+        return d["v"]
+    if "h" in d:
+        if not isinstance(a, (list, bytes)):
+            raise ValueError("diff does not apply to this base")
+        out, end = a, len(a)
+        for p, q, new in reversed(d["h"]):         # back to front: earlier offsets stay valid
+            if type(new) is not type(a) or not (0 <= p <= q <= end):
+                raise ValueError("diff does not apply to this base")
+            out = out[:p] + new + out[q:]
+            end = p
+        return out
+    if not isinstance(a, dict):
+        raise ValueError("diff does not apply to this base")
+    out = {k: v for k, v in a.items() if k not in d["x"]}
+    for k, sub in d["d"].items():
+        out[k] = info_patch(a.get(k), sub)
+    return out
+
+def pack_diff(d) -> bytes:
+    return msgpack.packb(d, use_bin_type=True)
+
+def unpack_diff(blob: bytes):
+    # info dict keys are bytes, and a diff-range reply is keyed by int seq: allow non-str map keys
+    return msgpack.unpackb(blob, raw=False, strict_map_key=False)
+
+class DiffLog:
+    """
+    Every diff this agent has seen, for every robot, so it can serve them to agents that missed some.
+    Keeps only the newest epoch per robot (diffs from before a seeder restart are useless).
+    ~1 kB per snapshot: a 90 min run is well under 1 MB per robot.
+    """
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._log = {}      # robot -> (epoch, {seq: blob})
+
+    def store(self, robot, epoch, seq, blob):
+        if blob is None:
+            return
+        robot, epoch, seq = int(robot), int(epoch), int(seq)
+        with self._lock:
+            ep, log = self._log.get(robot, (None, None))
+            if ep is None or epoch > ep:
+                self._log[robot] = (epoch, {seq: bytes(blob)})
+            elif epoch == ep:
+                log.setdefault(seq, bytes(blob))     # same seq = same blob (only the seeder makes them)
+
+    def get_range(self, robot, epoch, a, b) -> dict:
+        """{seq: blob} for whichever seqs in [a, b] this agent holds (possibly none)."""
+        with self._lock:
+            ep, log = self._log.get(int(robot), (None, {}))
+            if ep != int(epoch):
+                return {}
+            return {s: log[s] for s in range(int(a), int(b) + 1) if s in log}
+
+    def discard(self, robot, epoch, seqs):
+        """Forget diffs that failed to verify, so they aren't served to anyone else."""
+        with self._lock:
+            ep, log = self._log.get(int(robot), (None, {}))
+            if ep == int(epoch):
+                for s in seqs:
+                    log.pop(int(s), None)
 
 def load_state(state_file): # TODO
     if os.path.exists(state_file):
