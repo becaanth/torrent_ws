@@ -122,4 +122,4 @@ if __name__ == "__main__":
             msg_data = row['data']
             msg = deserialize_message(msg_data, msg_type)
             pm.append((msg.vertex_id))
-            print(f"pointmap vertex id {read_id(msg.vertex_id)}, ts: {row.timestamp}")
+            print(f"pointmap vertex id {read_id(msg.vertex_id)}, ts: {row.timestamp} | {msg.vertex_id}")
