@@ -103,7 +103,7 @@ class Reconstitutor:
 
         # file tracking
         self.db_files = []
-        self.db_written = []
+        self.db_written: set[str] = set()   # piece filenames already handled
 
         # list pieces that have been previewed, but not written
         self.pieces : dict[int, Piece] = {}
@@ -216,6 +216,15 @@ class Reconstitutor:
                 key=lambda x: int(x.split('.')[0], 16)
             )
             
+            # this robot's own pieces were cut from the live graph VTR is writing, so
+            # their data is already there: never parse or ingest them
+            if folder_name == str(self.robot_id):
+                for db_file in db_files:
+                    if db_file not in self.db_written:
+                        logging.debug(f"local piece, skip {db_file}")
+                        self.db_written.add(db_file)
+                continue
+
             for db_file in db_files:
                 if db_file in self.db_written:
                     continue
@@ -223,26 +232,25 @@ class Reconstitutor:
                 try:
                     first_vid = int(db_file[:-4],16)
 
-                    target_piece = None
-                    if folder_name != self.robot_id:
-                        # never open a file libtorrent is writing
-                        if not self._is_complete(os.path.join(robot_subfolder, db_file)):
-                            continue
+                    # never open a file libtorrent is writing
+                    if not self._is_complete(os.path.join(robot_subfolder, db_file)):
+                        continue
 
-                        if first_vid in self.pieces:
-                            target_piece = self.pieces[first_vid]
-                        else:
-                            for vid, piece in self.pieces.items():
-                                if piece.top_vertices:
-                                    v_min = piece.top_vertices[0].vertex_id
-                                    v_max = piece.top_vertices[-1].vertex_id
-                                    if v_min <= first_vid <= v_max:
-                                        target_piece = piece
-                                        break
-                        
-                        # if remote and not in our metadata, must be from a future session
-                        if target_piece is None:
-                            continue
+                    target_piece = None
+                    if first_vid in self.pieces:
+                        target_piece = self.pieces[first_vid]
+                    else:
+                        for vid, piece in self.pieces.items():
+                            if piece.top_vertices:
+                                v_min = piece.top_vertices[0].vertex_id
+                                v_max = piece.top_vertices[-1].vertex_id
+                                if v_min <= first_vid <= v_max:
+                                    target_piece = piece
+                                    break
+
+                    # not in our metadata yet (or from a future session): retry next poll
+                    if target_piece is None:
+                        continue
 
                     poll_data = self._parse_piece(folder_name, db_file)
                     # skip incomplete data
@@ -255,19 +263,11 @@ class Reconstitutor:
                     if poll_data['pointmap_ptr'].empty:
                         continue
 
-                    # if this robot's pieces
-                    # if folder_name == self.robot_id:
-                        # self._ingest_local_piece(poll_data)
-                        # logging.debug(f"local piece, skip {db_file}")
+                    self._ingest_remote_piece(poll_data, target_piece)
+                    evt("ingest", file=db_file, origin=folder_name)
+                    logging.debug(f"ingest remote piece {db_file}")
 
-                    else:
-                        if not self.pieces:
-                            continue # wait for metadata
-                        self._ingest_remote_piece(poll_data, target_piece)
-                        evt("ingest", file=db_file, origin=folder_name)
-                        logging.debug(f"ingest remote piece {db_file}")
-                    
-                    self.db_written.append(db_file)
+                    self.db_written.add(db_file)
                 except Exception as e:
                     logging.warning(f"{db_file} because {e}")
                     continue
