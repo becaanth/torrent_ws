@@ -411,3 +411,10 @@ def extract_minor_id(node_id: int) -> int:
 
 def is_root(node_id: int) -> bool:
     return extract_minor_id(node_id) == 0
+
+def compose_id(robot_id: int, major_id, minor_id: int) -> int:
+    """Inverse of read_id: (robot, major, minor) -> 64-bit vertex id.
+    major_id may be an int or a hex string like '0x840165dde8'."""
+    if isinstance(major_id, str):
+        major_id = int(major_id, 0)
+    return ((robot_id & 0xF) << 60) | ((major_id & 0xFFFFFFFFFFF) << 16) | (minor_id & 0xFFFF)
