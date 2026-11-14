@@ -85,6 +85,13 @@ if __name__ == "__main__":
 
     conn.close()
 
+    if db == 'vertices':
+        for _, row in poll_data['messages'].iterrows():
+            msg_type = get_message(poll_data["topics"]['type'].iloc[0])
+            msg_data = row['data']
+            msg = deserialize_message(msg_data, msg_type)
+            print(f"id: {read_id(msg.id)}")
+
     if db == 'edges':
         to_list = []
         from_list = []
