@@ -281,6 +281,10 @@ class Deconstitutor:
         return bool(np.any(same_seq & (self._this_vids > np.uint64(last_v))))
 
     @staticmethod
+    def _piece_filename(sid: int) -> str:
+        return f"{int(sid):016x}.db3"
+
+    @staticmethod
     def _is_ingress(e, seq: int) -> bool:
         """Branch ingress: spatial edge from the sequence's first vertex into another sequence
         (Tactic::connectToTrunk adds twig -> branch, so it points *out* of the new run)."""
@@ -309,6 +313,16 @@ class Deconstitutor:
                 continue
 
             sid = int(self._submap_ids[i])
+
+            # exit if this piece is already on disk (e.g. written before an orchestrator
+            # restart). Pieces are immutable once published: rewriting one changes its
+            # bytes, and with it the torrent the peers are downloading.
+            filename = self._piece_filename(sid)
+            if os.path.exists(os.path.join(self.output_dir, filename)):
+                if i not in self._written_chunks:
+                    logging.info(f"  [chunk {i}] SKIP: {filename} already on disk")
+                self._written_chunks.add(i)
+                continue
 
             # Rows in pointmap_ptr that belong to this submap
             ptr_row_idxs = np.where(self._map_vids == sid)[0]
@@ -384,8 +398,12 @@ class Deconstitutor:
             members = {int(v) for v in relevant_vids}
             last_v = max(v for v in members if (v >> 16) == seq)
 
+            # Merge (Tactic::connectToTrunk at teach end): spatial edge out of the
+            # sequence's last vertex. The target may be another run or this robot's
+            # own run (self-merge / loop closure onto the current teach), so the
+            # target sequence is not checked; ingress edges leave minor 0 instead.
             merged = any(
-                int(e.from_id) == last_v and (int(e.to_id) >> 16) != seq
+                int(e.from_id) == last_v
                 and e.type.type == 1 and not self._is_ingress(e, seq)
                 for e in manual_edges
             )
@@ -402,7 +420,6 @@ class Deconstitutor:
             chunk_edges = chunk_edges[keep]
 
             # --- write chunk ------------------------------------------------
-            filename = f"{str(hex(int(sid)))[2:].zfill(16)}.db3"
             staging_path = os.path.join(self.staging_dir, filename)
             final_path = os.path.join(self.output_dir, filename)
 
@@ -410,6 +427,9 @@ class Deconstitutor:
             def _drop_rowid(df: pd.DataFrame) -> pd.DataFrame:
                 return df.drop(columns=['rowid'], errors='ignore')
 
+            # a staging file left by a crash mid-write is incomplete: start fresh
+            if os.path.exists(staging_path):
+                os.remove(staging_path)
             conn = sqlite3.connect(staging_path)
             if self._index_df is not None:
                 _drop_rowid(self._index_df).to_sql('vtr_index',  conn, if_exists='replace', index=False)
@@ -422,7 +442,16 @@ class Deconstitutor:
             conn.close()
 
             size = os.path.getsize(staging_path)
-            os.rename(staging_path, final_path)
+            # publish without overwriting: os.link fails atomically if final_path exists
+            # (os.rename would silently replace it)
+            try:
+                os.link(staging_path, final_path)
+            except FileExistsError:
+                logging.warning(f"  [chunk {i}] {filename} appeared on disk during write; keeping existing piece")
+                os.remove(staging_path)
+                self._written_chunks.add(i)
+                continue
+            os.remove(staging_path)
             evt("chunk", file=filename, sid=hex(sid), bytes=size)
             self._written_chunks.add(i)
             logging.debug(f"finalized chunk {filename}")
