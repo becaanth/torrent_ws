@@ -18,6 +18,11 @@ Animations (MP4, or GIF with --gif):
   anim3_positions  robots on the teach graph over time
   anim4_transfers  the same, with an arrow from sender to receiver for every active transfer,
                    width proportional to its rate
+  anim5_knowledge  2x2, one panel per robot: only what that robot's graph held at each moment, from its
+                   own logs -- its own teach as it is taught, other robots' submaps faint once listed in
+                   metadata it received (layout only) and solid once their files were downloaded
+                   (needs --positions; --ghosts adds the other robots' actual positions in grey).
+                   Same frames as anim3/anim4, so the videos stay in sync
 Tables (CSV): flows_1s.csv (src, dst, bytes per second), upload_matrix.csv (sent vs received, per pair)
 
 Positions: pass --positions (vid,x,y from export_vertex_positions.py) for the real map.
@@ -47,11 +52,11 @@ LINE_COLORS = dict(enumerate(ROBOT_COLORS))
 LINE_COLORS[2] = "#d9a900"                      # col_mustard: darker yellow so lines read on white
 TYPE_COLORS = {"pieces": "#1f4e79", "metadata": "#c55a11", "gossip": "#7f7f7f"}
 
-ROBOT_ADDRS = {
-    'mr_green':'192.168.2.42',
-    'prof_plum':'192.168.3.42',
-    'col_mustard':'192.168.4.42',
-    'mrs_peacock':'192.168.5.42' 
+ROBOT_ADDRS = {          # robot id (as in the logs' "init with id N") -> its radio IP
+    0: '192.168.2.42',   # mr_green
+    1: '192.168.3.42',   # prof_plum
+    2: '192.168.4.42',   # col_mustard
+    3: '192.168.5.42',   # mrs_peacock
 }
 
 import shutil
@@ -98,6 +103,20 @@ class PaletteGifWriter(animation.PillowWriter):
         q = [f.quantize(palette=ref, dither=Image.Dither.NONE) for f in frames]
         q[0].save(self.outfile, save_all=True, append_images=q[1:], duration=int(1000 / self.fps),
                   loop=0, optimize=False)
+
+
+REAL_NAMES = {0: "Mr Green", 1: "Professor Plum", 2: "Colonel Mustard", 3: "Mrs Peacock"}
+
+
+def use_names(kind):
+    """--names: 'anon' keeps Robot 0..3, 'real' switches every label to the robots' names. ROBOT_NAMES is
+    animate_robots' dict, updated in place so all figures and animations pick it up."""
+    if kind == "real":
+        ROBOT_NAMES.update(REAL_NAMES)
+
+
+def name_width():
+    return max(len(v) for v in ROBOT_NAMES.values())
 
 
 def name(r):
@@ -261,13 +280,23 @@ def fig2_bandwidth(ev, t0, t1, out, fmts, bin_s):
     series = {}
     pf = flows(ev, 1.0)                                      # receivers' counts, senders' where missing
     series["pieces"] = (pf["t"].to_numpy() + 0.5, pf["bytes"].to_numpy())
+    # metadata = full info dicts fetched over ut_metadata + diff-range query replies (both in the
+    # "metadata" event's bytes) + diffs carried inline by gossip (gossip_rx.diff_bytes), which are
+    # moved out of the gossip series so nothing is counted twice
+    md_t, md_b = [], []
     if "metadata" in ev:
-        series["metadata"] = (ev["metadata"]["t"].to_numpy(), ev["metadata"]["bytes"].to_numpy())
+        md_t.append(ev["metadata"]["t"].to_numpy()); md_b.append(ev["metadata"]["bytes"].to_numpy())
     if "gossip_rx" in ev:
         g = ev["gossip_rx"]
         own_ip = g["robot"].map(lambda r: ROBOT_ADDRS.get(int(r)))   # robot -> its own IP
         g = g[g["via_ip"] != own_ip]                                  # self-echoes never hit the radio
-        series["gossip"] = (g["t"].to_numpy(), g["bytes"].to_numpy())
+        db = g["diff_bytes"].fillna(0).to_numpy() if "diff_bytes" in g else np.zeros(len(g))
+        series["gossip"] = (g["t"].to_numpy(), g["bytes"].to_numpy() - db)
+        if db.any():
+            md_t.append(g["t"].to_numpy()[db > 0]); md_b.append(db[db > 0])
+    if md_t:
+        series["metadata"] = (np.concatenate(md_t), np.concatenate(md_b))
+    series = {k: series[k] for k in ("pieces", "metadata", "gossip") if k in series}   # legend order
 
     edges = np.arange(t0, t1 + bin_s, bin_s)
     centers = minutes(edges[:-1] + bin_s / 2, t0)
@@ -595,15 +624,11 @@ def drop_restart_reports(v, root, gap):
     return pd.concat(keep).sort_values("t")
 
 
-def animate(ev, out, args, with_flows):
-    stem = "anim4_transfers" if with_flows else "anim3_positions"
-    bare = args.bare
-    if bare:   # just the map: no title, axes, legends, captions or margins
-        stem += "_bare"
-        args = argparse.Namespace(**{**vars(args), "no_title": True, "no_axis_labels": True})
-    if "vertex" not in ev or not len(ev["vertex"]):
-        print(f"  skipped {stem}: no vertex events")
-        return
+def anim_setup(ev, args, stem):
+    """What every animation shares: vertex positions (map or strip), robot tracks, and the frame times
+    (periods with no data longer than --gap are skipped; `jumps` maps frame index -> skipped seconds).
+    Animations built from this all use the same frames, so videos made in one run stay in sync."""
+    from types import SimpleNamespace
     strip = not args.positions
     pos_file = read_positions(args.positions) if args.positions else None
     v = drop_restart_reports(ev["vertex"], root_vid(ev, pos_file), args.gap)
@@ -631,7 +656,6 @@ def animate(ev, out, args, with_flows):
         tracks[r] = (tc, xy, sp)
         spans += sp
 
-    fl = flows(ev, 1.0) if with_flows else None
     dt = args.speed / args.fps
     segments = merge(spans, pad=1.0)
     frames, jumps = [], {}
@@ -643,9 +667,72 @@ def animate(ev, out, args, with_flows):
         frames = frames[:args.max_frames]
     print(f"  {stem}: {len(frames)} frames ({len(frames) / args.fps:.0f} s of video at x{args.speed:g})")
 
-    bg = np.array(list(pos.values()))
-    t_lo = min(d["t"].min() for d in ev.values())
-    t_hi = max(d["t"].max() for d in ev.values())
+    return SimpleNamespace(strip=strip, pos=pos, stamps=stamps, geo=geo, lanes=lanes, tracks=tracks,
+                           frames=frames, jumps=jumps, dt=dt, bg=np.array(list(pos.values())),
+                           t_lo=min(d["t"].min() for d in ev.values()),
+                           t_hi=max(d["t"].max() for d in ev.values()))
+
+
+def anim_time(frames, args, t_lo):
+    """--frame_at HH:MM:SS -> experiment time (UTC on the day of the run, or since the start with --elapsed)."""
+    from datetime import datetime, timezone
+    hh, mm, ss = (int(x) for x in args.frame_at.split(":"))
+    if args.elapsed:
+        return t_lo + 3600 * hh + 60 * mm + ss
+    day = datetime.fromtimestamp(frames[0], timezone.utc).date()
+    return datetime(day.year, day.month, day.day, hh, mm, ss, tzinfo=timezone.utc).timestamp()
+
+
+def anim_clock(args, t_lo):
+    def clock(T):
+        if args.elapsed:
+            s_ = int(max(0.0, T - t_lo))
+            return f"T+{s_ // 3600:02d}:{s_ % 3600 // 60:02d}:{s_ % 60:02d}"
+        return f"{fmt_t(T)} UTC"
+    return clock
+
+
+def anim_write(fig, draw, frames, out, stem, args, bare, t_lo):
+    """One still (--frame_at) or the whole video (MP4, or GIF with --gif)."""
+    if args.frame_at:
+        T = anim_time(frames, args, t_lo)
+        frames.append(T)
+        frames.sort()
+        draw(frames.index(T))
+        path = os.path.join(out, f"{stem}_{args.frame_at.replace(':', '')}.png")
+        if bare:                                         # the exact frame, no cropping or padding
+            fig.savefig(path, dpi=fig.dpi)
+        else:
+            fig.savefig(path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  wrote {os.path.basename(path)}")
+        return
+    anim = animation.FuncAnimation(fig, draw, frames=len(frames), blit=False)
+    path = os.path.join(out, stem + (".gif" if args.gif else ".mp4"))
+    if args.gif:   # keep the robot colours exact; see PaletteGifWriter
+        keep = list(LINE_COLORS.values()) + list(ROBOT_COLORS) + list(TYPE_COLORS.values()) + ["black", "white", "#b00020", "#555", "#999"]
+        writer = PaletteGifWriter(keep, fps=args.fps)
+    else:
+        writer = animation.FFMpegWriter(fps=args.fps, bitrate=8000 if args.aspect else 3000,
+                                        extra_args=["-pix_fmt", "yuv420p"])   # plays everywhere, incl. YouTube
+    anim.save(path, writer=writer)
+    plt.close(fig)
+    print(f"  wrote {os.path.basename(path)}")
+
+
+def animate(ev, out, args, with_flows):
+    stem = "anim4_transfers" if with_flows else "anim3_positions"
+    bare = args.bare
+    if bare:   # just the map: no title, axes, legends, captions or margins
+        stem += "_bare"
+        args = argparse.Namespace(**{**vars(args), "no_title": True, "no_axis_labels": True})
+    if "vertex" not in ev or not len(ev["vertex"]):
+        print(f"  skipped {stem}: no vertex events")
+        return
+    s = anim_setup(ev, args, stem)
+    strip, pos, stamps, geo, lanes, tracks = s.strip, s.pos, s.stamps, s.geo, s.lanes, s.tracks
+    frames, jumps, dt, bg, t_lo, t_hi = s.frames, s.jumps, s.dt, s.bg, s.t_lo, s.t_hi
+    fl = flows(ev, 1.0) if with_flows else None
     live = not args.static_graph
     fixed_layout = False
     if strip:
@@ -729,11 +816,7 @@ def animate(ev, out, args, with_flows):
             labels[r].set_path_effects([pe.withStroke(linewidth=2.5, foreground="white")])
     if not strip and not bare:
         ax.legend(loc="upper left", fontsize=8, framealpha=0.85)   # transfer list sits upper right
-    def clock(T):
-        if args.elapsed:
-            s_ = int(max(0.0, T - t_lo))
-            return f"T+{s_ // 3600:02d}:{s_ % 3600 // 60:02d}:{s_ % 60:02d}"
-        return f"{fmt_t(T)} UTC"
+    clock = anim_clock(args, t_lo)
     title = ax.set_title("" if args.no_title else clock(frames[0] if frames else t_lo), pad=14)
     note = ax.text(0.0, 1.01, "", transform=ax.transAxes, fontsize=8, color="#b00020")
     flow_box = ax.text(0.99, 0.97, "", transform=ax.transAxes, ha="right", va="top", fontsize=8,
@@ -798,7 +881,8 @@ def animate(ev, out, args, with_flows):
             for (s, d), rate in cur.sort_values(ascending=False).items():
                 if rate <= 0:
                     continue
-                lines.append(f"{ROBOT_NAMES.get(s, s):>12s} -> {ROBOT_NAMES.get(d, d):<12s} {rate / MB:5.2f} MB/s")
+                nw = max(12, name_width())
+                lines.append(f"{str(ROBOT_NAMES.get(s, s)):>{nw}s} -> {str(ROBOT_NAMES.get(d, d)):<{nw}s} {rate / MB:5.2f} MB/s")
                 if s in here and d in here and not np.allclose(here[s], here[d]):
                     w = 1.0 + 7.0 * min(1.0, rate / max(peak / win, 1.0))
                     arr = FancyArrowPatch(tuple(here[s]), tuple(here[d]), arrowstyle="-|>",
@@ -813,36 +897,238 @@ def animate(ev, out, args, with_flows):
 
     if not fixed_layout:
         fig.tight_layout()
-    if args.frame_at:                                    # one still instead of a video
-        from datetime import datetime, timezone
-        hh, mm, ss = (int(x) for x in args.frame_at.split(":"))
-        if args.elapsed:                                 # HH:MM:SS since the start of the run
-            T = t_lo + 3600 * hh + 60 * mm + ss
-        else:                                            # HH:MM:SS UTC on the day of the run
-            day = datetime.fromtimestamp(frames[0], timezone.utc).date()
-            T = datetime(day.year, day.month, day.day, hh, mm, ss, tzinfo=timezone.utc).timestamp()
-        frames.append(T)
-        frames.sort()
-        draw(frames.index(T))
-        path = os.path.join(out, f"{stem}_{args.frame_at.replace(':', '')}.png")
-        if bare:                                         # the exact frame, no cropping or padding
-            fig.savefig(path, dpi=fig.dpi)
-        else:
-            fig.savefig(path, dpi=200, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  wrote {os.path.basename(path)}")
+    anim_write(fig, draw, frames, out, stem, args, bare, t_lo)
+
+
+def knowledge_times(ev, vids, rt, robots):
+    """
+    When each robot came to know each teach vertex, from its own logs only:
+      own vertices       -> reveal time (as the robot teaches them)
+      others' vertices   -> t_meta: first metadata from the teacher listing the vertex's submap
+                            t_data: first time that submap's file finished downloading
+    Submap of a vertex: submap files are named by their first vertex id, so a vertex belongs to the
+    submap of its run with the largest start minor id <= its own. A metadata version with `pieces` = N
+    lists the teacher's first N submaps in the order it wrote them (its chunk events); counting the
+    pieces avoids the race where a chunk is written just before a snapshot is published.
+    Returns {robot: {vid: (t_meta, t_data)}}, and {teacher: sorted chunk write times} for the counts.
+    """
+    inf = np.inf
+    c = ev["chunk"].sort_values("t", kind="stable").drop_duplicates(["robot", "file"]) if "chunk" in ev else None
+    order, starts, chunk_t = {}, {}, {}
+    for o, d in (c.groupby("robot") if c is not None else []):
+        o = int(o)
+        chunk_t[o] = d["t"].to_numpy()
+        for k, f in enumerate(d["file"]):
+            sid = int(f[:16], 16)
+            order[f] = (o, k)
+            starts.setdefault(sid >> 16, []).append((sid & 0xFFFF, f))
+    starts = {run: (np.array([m for m, _ in s]), [f for _, f in s]) for run, s in ((r, sorted(v)) for r, v in starts.items())}
+    sub_of = {}
+    for v in vids:
+        v = int(v)
+        s = starts.get(v >> 16)
+        if s is not None:
+            j = max(int(np.searchsorted(s[0], v & 0xFFFF, side="right")) - 1, 0)
+            sub_of[v] = s[1][j]
+
+    # metadata: (robot, teacher) -> time at which the k-th submap (0-based) first became listed
+    meta = {}
+    if "metadata" in ev:
+        m = ev["metadata"].dropna(subset=["origin", "pieces"]).sort_values("t", kind="stable")
+        for (r, o), d in m.groupby([m["robot"].astype(int), m["origin"].astype(int)]):
+            n = np.maximum.accumulate(d["pieces"].to_numpy(dtype=int))
+            meta[(r, o)] = (n, d["t"].to_numpy())
+    data = {}
+    if "piece" in ev:
+        p = ev["piece"].sort_values("t", kind="stable").drop_duplicates(["robot", "file"])   # restarts re-announce
+        data = {(int(r), f): t for r, f, t in zip(p["robot"], p["file"], p["t"])}
+
+    out = {}
+    for r in robots:
+        known = {}
+        for v in vids:
+            v = int(v)
+            o = teacher_of(v)
+            if o == r:
+                t = rt.get(v, inf)
+                known[v] = (t, t)
+                continue
+            f = sub_of.get(v)
+            if f is None:
+                known[v] = (inf, inf)
+                continue
+            td = data.get((r, f), inf)
+            tm = inf
+            if (r, o) in meta:
+                n, t = meta[(r, o)]
+                i = np.searchsorted(n, order[f][1] + 1, side="left")   # first version listing it
+                tm = float(t[i]) if i < len(t) else inf
+            known[v] = (min(tm, td), td)                               # data implies its layout
+        out[r] = known
+    return out, chunk_t, sub_of, order, data, meta
+
+
+def tint(c, amount=0.6):
+    """c mixed with white (amount 0 = c, 1 = white)."""
+    rgb = np.array(mcolors.to_rgb(c))
+    return tuple(rgb + (1 - rgb) * amount)
+
+
+def animate_knowledge(ev, out, args):
+    """anim5: 2x2, one panel per robot, showing only what that robot knew of the graph at each moment."""
+    stem = "anim5_knowledge"
+    bare = args.bare
+    if bare:
+        stem += "_bare"
+        args = argparse.Namespace(**{**vars(args), "no_title": True, "no_axis_labels": True})
+    if not args.positions:
+        print(f"  skipped {stem}: needs --positions (real map)")
         return
-    anim = animation.FuncAnimation(fig, draw, frames=len(frames), blit=False)
-    path = os.path.join(out, stem + (".gif" if args.gif else ".mp4"))
-    if args.gif:   # keep the robot colours exact; see PaletteGifWriter
-        keep = list(LINE_COLORS.values()) + list(ROBOT_COLORS) + list(TYPE_COLORS.values()) + ["black", "white", "#b00020", "#555", "#999"]
-        writer = PaletteGifWriter(keep, fps=args.fps)
-    else:
-        writer = animation.FFMpegWriter(fps=args.fps, bitrate=8000 if args.aspect else 3000,
-                                        extra_args=["-pix_fmt", "yuv420p"])   # plays everywhere, incl. YouTube
-    anim.save(path, writer=writer)
-    plt.close(fig)
-    print(f"  wrote {os.path.basename(path)}")
+    if "vertex" not in ev or not len(ev["vertex"]):
+        print(f"  skipped {stem}: no vertex events")
+        return
+    s = anim_setup(ev, args, stem)
+    pos, geo, tracks, frames, jumps, bg, t_lo, t_hi = s.pos, s.geo, s.tracks, s.frames, s.jumps, s.bg, s.t_lo, s.t_hi
+    robots = sorted(log_windows(ev))[:4]
+    rt = reveal_times(ev, pos.keys(), s.stamps, t_lo, t_hi)
+    know, chunk_t, sub_of, order, data, meta = knowledge_times(ev, pos.keys(), rt, robots)
+    teachers = sorted({teacher_of(v) for v in pos})
+    n_sub = {o: len(t) for o, t in chunk_t.items()}
+
+    # ---- layout: fixed video frame, 2x2 panels with the map filling each
+    size, dpi = video_frame(args.aspect or "16:9")
+    fig = plt.figure(figsize=size, dpi=dpi)
+    top = 0.01 if args.no_title else 0.075
+    bottom = 0.01 if bare else 0.075                     # two legend rows
+    gap_x, gap_y, side = 0.008, 0.035 if not bare else 0.008, 0.006
+    w = (1 - 2 * side - gap_x) / 2
+    h = (1 - top - bottom - gap_y) / 2
+    imagery_on = geo is not None and args.basemap != "none"
+    panels = {}
+    for i, r in enumerate(robots):
+        row, col = divmod(i, 2)
+        ax = fig.add_axes([side + col * (w + gap_x), bottom + (1 - row) * (h + gap_y), w, h])
+        draw_map(ax, bg, geo, args, graph=False, box_aspect=(w * size[0]) / (h * size[1]))
+        hide_axis_labels(ax)
+        for sp in ax.spines.values():                    # no frame around the panels
+            sp.set_visible(False)
+        ink = "white" if imagery_on else "#222222"
+        label = ax.text(0.012, 0.985, f"{name(r)}", transform=ax.transAxes, ha="left", va="top",
+                        fontsize=10, fontweight="bold", color=ink, zorder=8)
+        if imagery_on:
+            import matplotlib.patheffects as pe
+            label.set_path_effects([pe.withStroke(linewidth=2.5, foreground="black")])
+        # per teacher: the layer(s) this robot holds, revealed in time order
+        layers = []
+        for o in teachers:
+            vs = [v for v in pos if teacher_of(v) == o]
+            kinds = [("own", 1)] if o == r else [("meta", 0), ("data", 1)]
+            for kind, col_i in kinds:
+                times = np.array([know[r][v][col_i] for v in vs])
+                xy = np.array([pos[v] for v in vs])
+                keep = ~np.isposinf(times)
+                times, xy = times[keep], xy[keep]
+                idx = np.argsort(times, kind="stable")
+                times, xy = times[idx], xy[idx]
+                faint = kind == "meta"
+                # consecutive vertices are centimetres apart, so a translucent layer still reads as solid:
+                # the layout-only layer is a thin pale tint of the teacher's colour, the data layer full and wide
+                art, = ax.plot([], [], ".", color=tint(color(o)) if faint else color(o), mew=0,
+                               ms=1.8 if faint else 4.2, zorder=1 if faint else 2)
+                layers.append((art, times, xy))
+        trail, = ax.plot([], [], "-", color=color(r), lw=2, alpha=0.5, zorder=3)
+        dot, = ax.plot([], [], "o", color=LINE_COLORS.get(r, "#999"), ms=10, mec="black", mew=0.8, zorder=5)
+        ghosts = {}
+        if args.ghosts:
+            for q in tracks:
+                if q != r:
+                    ghosts[q], = ax.plot([], [], "o", ms=6, mfc="#bdbdbd", mec=color(q), mew=1.2, alpha=0.8, zorder=4)
+        box = ax.text(0.988, 0.075 if imagery_on else 0.015, "", transform=ax.transAxes, ha="right",
+                      va="bottom", fontsize=7.5,                            # above the imagery credit
+                      family="monospace", zorder=8, visible=not bare,
+                      bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#cccccc", alpha=0.85))
+        panels[r] = dict(ax=ax, layers=layers, trail=trail, dot=dot, ghosts=ghosts, box=box)
+
+    clock = anim_clock(args, t_lo)
+    title = None if args.no_title else fig.text(0.5, 1 - 0.012, "", ha="center", va="top", fontsize=13)
+    note = None if bare else fig.text(side, 1 - top + 0.004, "", fontsize=8, color="#b00020", va="bottom")
+    if not bare:
+        from matplotlib.lines import Line2D
+        hs = [Line2D([], [], ls="", marker=".", ms=6, color=tint("#555555"), label="layout known from metadata (no data yet)"),
+              Line2D([], [], ls="", marker=".", ms=11, color="#555555", label="downloaded, or its own teach")]
+        hs += [Line2D([], [], ls="", marker="s", ms=7, color=color(o), label=f"taught by {name(o)}") for o in teachers]
+        if args.ghosts:
+            hs.append(Line2D([], [], ls="", marker="o", ms=6, mfc="#bdbdbd", mec="#555",
+                             label="other robots' actual positions (not known to this robot)"))
+        fig.legend(handles=hs, loc="lower center", ncol=(len(hs) + 1) // 2, frameon=False, fontsize=8,
+                   bbox_to_anchor=(0.5, 0.0), handletextpad=0.3, columnspacing=1.4)
+
+    def holding(r, T):
+        """Robot r's position at T (last known if not localised), as in anim3."""
+        tc, xy, sp = tracks.get(r, (np.array([]), np.zeros((0, 2)), []))
+        if not len(tc):
+            return None, None
+        p = position_at(T, tc, xy) if any(a - 1 <= T <= b + 1 for a, b in sp) else None
+        if p is None:
+            last = np.searchsorted(tc, T, side="right")
+            p = xy[last - 1] if last else None
+        return p, (tc, xy)
+
+    dl_t = {(r, o): np.sort([t for (rr, f), t in data.items() if rr == r and f in order and order[f][0] == o])
+            for r in robots for o in teachers}
+
+    nw = max(len("own teach"), name_width())
+
+    def counts(r, T):
+        lines = []
+        for o in teachers:
+            made = int(np.searchsorted(chunk_t.get(o, []), T, side="right"))
+            if o == r:
+                lines.append(f"{'own teach':<{nw}s} {made:4d} submaps")
+                continue
+            k_meta = 0
+            if (r, o) in meta:
+                n, t = meta[(r, o)]
+                i = np.searchsorted(t, T, side="right")
+                k_meta = int(n[i - 1]) if i else 0
+            k_data = int(np.searchsorted(dl_t[(r, o)], T, side="right"))
+            lines.append(f"{name(o):<{nw}s} {max(k_meta, k_data):4d} known {k_data:4d} dl / {made}")
+        return "\n".join(lines)
+
+    note_until = [-1]
+
+    def draw(i):
+        T = frames[i]
+        for r, P in panels.items():
+            for art, times, xy in P["layers"]:
+                n = np.searchsorted(times, T, side="right")
+                art.set_data(xy[:n, 0], xy[:n, 1])
+            p, tr = holding(r, T)
+            if p is None:
+                P["dot"].set_data([], [])
+                P["trail"].set_data([], [])
+            else:
+                tc, xy = tr
+                m = (tc >= T - args.trail) & (tc <= T)
+                pts = np.vstack([xy[m], p])
+                P["trail"].set_data(pts[:, 0], pts[:, 1])
+                P["dot"].set_data([p[0]], [p[1]])
+            for q, g in P["ghosts"].items():
+                pq, _ = holding(q, T)
+                g.set_data(*(([pq[0]], [pq[1]]) if pq is not None else ([], [])))
+            if not bare:
+                P["box"].set_text(counts(r, T))
+        if title is not None:
+            title.set_text(f"What each robot knows of the graph   {clock(T)}   (x{args.speed:g})")
+        if note is not None:
+            if i in jumps:
+                note_until[0] = i + 2 * args.fps
+                note.set_text(f"no data for {jumps[i] / 60:.1f} min, skipped")
+            if i > note_until[0]:
+                note.set_text("")
+        return []
+
+    anim_write(fig, draw, frames, out, stem, args, bare, t_lo)
 
 
 # ======================================================================= main
@@ -852,10 +1138,10 @@ def main():
     ap.add_argument("-o", "--out", default="figures")
     ap.add_argument("--positions", help="vid,x,y CSV from export_vertex_positions.py")
     ap.add_argument("--only", default="fig1,fig2,fig3,anim3,anim4",
-                    help="comma list of fig1,fig2,fig3,anim3,anim4,map_check")
+                    help="comma list of fig1,fig2,fig3,anim3,anim4,anim5,map_check (anim5 needs --positions)")
     ap.add_argument("--fmt", default="png,pdf", help="figure formats")
     ap.add_argument("--bin", type=float, default=10.0, help="rate bin for fig2 (s)")
-    ap.add_argument("--piece_size", type=float, default=2 * 2**20, help="seeder PIECE_SIZE (bytes)")
+    ap.add_argument("--piece_size", type=float, default=1 * 2**20, help="seeder PIECE_SIZE (bytes)")
     ap.add_argument("--speed", type=float, default=20.0, help="experiment seconds per video second")
     ap.add_argument("--fps", type=int, default=10)
     ap.add_argument("--trail", type=float, default=30.0, help="position trail (s)")
@@ -875,9 +1161,15 @@ def main():
     ap.add_argument("--no_axis_labels", action="store_true",
                     help="animations and map_check: hide axis titles, ticks and tick labels")
     ap.add_argument("--bare", action="store_true",
-                    help="write only the transfers animation (anim4), as just the map: no title, axes, "
-                         "legends, transfer list, captions or margins (the scale bar stays). "
-                         "Combine with --aspect for a fixed frame; otherwise the frame takes the map's shape")
+                    help="write only the transfers animation (anim4), or anim5 if --only includes it, as just "
+                         "the map: no title, axes, legends, transfer list, captions or margins (the scale bar "
+                         "stays). Combine with --aspect for a fixed frame; otherwise the frame takes the map's shape")
+    ap.add_argument("--names", choices=("anon", "real"), default="anon",
+                    help="robot labels in every figure and animation: 'anon' = Robot 0..3, "
+                         "'real' = Mr Green, Professor Plum, Colonel Mustard, Mrs Peacock")
+    ap.add_argument("--ghosts", action="store_true",
+                    help="anim5: also show the other robots' actual positions in each panel (grey), "
+                         "although the robot whose graph it is does not know them")
     ap.add_argument("--static_graph", action="store_true",
                     help="draw the whole teach graph from the first frame (grey) instead of as it is taught")
     g = ap.add_argument_group("satellite basemap (needs --positions)")
@@ -901,9 +1193,12 @@ def main():
     g.add_argument("--tile_cache", default=os.path.expanduser("~/.cache/ttr_tiles"),
                    help="tile cache directory (downloads once, re-renders offline)")
     args = ap.parse_args()
+    use_names(args.names)
 
     os.makedirs(args.out, exist_ok=True)
-    only = {"anim4"} if args.bare else set(args.only.split(","))
+    only = set(args.only.split(","))
+    if args.bare:                                        # bare writes one animation: anim5 if asked, else anim4
+        only = {"anim5"} if "anim5" in only else {"anim4"}
     fmts = args.fmt.split(",")
 
     ev = te.load(args.logs)
@@ -938,6 +1233,8 @@ def main():
         animate(ev, args.out, args, with_flows=False)
     if "anim4" in only and "xfer" in ev:
         animate(ev, args.out, args, with_flows=True)
+    if "anim5" in only:
+        animate_knowledge(ev, args.out, args)
 
 
 if __name__ == "__main__":
